@@ -678,8 +678,11 @@ def api_role_save():
     name = str(body.get("name", "")).strip()
     if not name or not re.match(r"^[A-Za-z0-9_\-\u4e00-\u9fa5]{1,40}$", name):
         return jsonify(error="角色名不合法"), 400
+    target = _role_path(name)
+    if os.path.exists(target):
+        return jsonify(error=f"角色卡「{name}」已存在，新建不能用同名（编辑请点该卡的编辑）"), 409
     os.makedirs(ROLE_DIR, exist_ok=True)
-    _write_json(_role_path(name), {"name": name, "description": body.get("description", ""), "system": body.get("system", "")})
+    _write_json(target, {"name": name, "description": body.get("description", ""), "system": body.get("system", "")})
     return jsonify(ok=True)
 
 
@@ -693,6 +696,9 @@ def api_role_del(name):
     a = _admin()
     if a.get("default_role") == name:
         a["default_role"] = "viola"
+        _write_json(ADMIN_DATA, a)
+    if a.get("admin_role") == name:
+        a["admin_role"] = None
         _write_json(ADMIN_DATA, a)
     for gid, g in (a.get("groups") or {}).items():
         if g.get("role") == name:
