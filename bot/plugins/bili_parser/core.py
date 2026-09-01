@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import base64
 import json
 import re
 import urllib.parse
@@ -96,6 +97,29 @@ async def fetch_video(bvid: str) -> Optional[Dict]:
         if payload.get("code") != 0:
             return None
         return payload.get("data")
+    except Exception:
+        return None
+
+
+async def download_image_base64(url: str, timeout: float = 10.0) -> Optional[str]:
+    """下载图片并转为 base64:// 数据（带 B站 Referer 绕过防盗链）。
+
+    返回可直接用于 MessageSegment.image 的 base64:// 字符串；失败返回 None。
+    """
+    try:
+
+        def _do():
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": UA, "Referer": "https://www.bilibili.com/"},
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read()
+
+        data = await asyncio.to_thread(_do)
+        if not data:
+            return None
+        return "base64://" + base64.b64encode(data).decode("ascii")
     except Exception:
         return None
 

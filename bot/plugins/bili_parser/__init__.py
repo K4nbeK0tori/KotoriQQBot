@@ -4,10 +4,16 @@ import json
 import time
 from typing import Dict
 
-from nonebot import on_message
+from nonebot import logger, on_message
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent, MessageSegment
 
-from .core import build_reply, extract_bvid, fetch_video, resolve_bvid
+from .core import (
+    build_reply,
+    download_image_base64,
+    extract_bvid,
+    fetch_video,
+    resolve_bvid,
+)
 
 # 防刷：同一会话（群/私聊）N 秒内只解析一次
 RATE_LIMIT_SECONDS = 30
@@ -34,29 +40,45 @@ async def handle(bot: Bot, event: MessageEvent):
     now = time.time()
     session = getattr(event, "group_id", None) or event.user_id
     if now - _last_handle.get(session, 0) < RATE_LIMIT_SECONDS:
+        logger.info(f"[bili] 限流跳过: session={session}")
         return
 
     raw = extract_bvid(event.get_plaintext(), _collect_json_payloads(event))
+    logger.info(f"[bili] 提取: {raw!r}")
     if not raw:
         return
     bvid = await resolve_bvid(raw)
+    logger.info(f"[bili] 展开: {bvid!r}")
     if not bvid or not bvid.startswith("BV"):
         return
     info = await fetch_video(bvid)
     if not info:
+        logger.warning(f"[bili] B站API查询失败: {bvid}")
         return
+    logger.info(f"[bili] API成功: {bvid} title={info.get('title', '')[:24]}")
     _last_handle[session] = now
 
     text = build_reply(info, bvid)
     pic = info.get("pic", "")
-    # 优先带封面图发送；图片失败时退化为纯文字
+
+    # 方式1：文字 + 封面图（下载转 base64，绕过 B站防盗链）
     try:
         segs = [MessageSegment.text(text)]
         if pic:
-            segs.append(MessageSegment.image(pic))
+            img = await download_image_base64(pic)
+            if img:
+                segs.append(MessageSegment.image(img))
+            else:
+                logger.warning(f"[bili] 封面图下载失败，仅发文字: {pic}")
         await bot.send(event, segs)
-    except Exception:
-        try:
-            await bot.send(event, MessageSegment.text(text))
-        except Exception:
-            pass
+        logger.info(f"[bili] 发送成功: {bvid} -> {session}")
+        return
+    except Exception as e:
+        logger.warning(f"[bili] 带图发送失败: {e!r}")
+
+    # 方式2：降级纯文字
+    try:
+        await bot.send(event, MessageSegment.text(text))
+        logger.info(f"[bili] 发送成功(纯文字): {bvid} -> {session}")
+    except Exception as e:
+        logger.error(f"[bili] 发送失败: {bvid} -> {e!r}")
