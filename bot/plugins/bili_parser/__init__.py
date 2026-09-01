@@ -44,6 +44,20 @@ def _collect_json_payloads(event: MessageEvent):
     return payloads
 
 
+FAIL_MSG = "哎呀，老师的视频剪辑失败了呢，需要我给你讲个小故事吗，比如“人类与火的故事？”"
+
+
+async def _send_fail(bot: Bot, event: MessageEvent, bvid: str, session) -> bool:
+    """发送剪辑失败提示。返回是否成功。"""
+    try:
+        await bot.send(event, MessageSegment.text(FAIL_MSG))
+        logger.info(f"[bili] 失败提示已发送: {bvid} -> {session}")
+        return True
+    except Exception as e:
+        logger.warning(f"[bili] 失败提示发送失败: {bvid} -> {e!r}")
+        return False
+
+
 async def _send_info(
     bot: Bot, event: MessageEvent, text: str, info, bvid: str, session
 ) -> bool:
@@ -119,6 +133,15 @@ async def handle(bot: Bot, event: MessageEvent):
     cid = info.get("cid")
     text = build_reply(info, bvid)
 
+    # 下载提示
+    try:
+        await bot.send(
+            event,
+            MessageSegment.text(f"已经收到老师发送的（{bvid}），薇欧拉酱正在善意剪辑哦~"),
+        )
+    except Exception as e:
+        logger.warning(f"[bili] 下载提示发送失败: {e!r}")
+
     # 主流程：下载视频 → 发解析信息 + 发视频 → 删除
     async with _download_lock:
         logger.info(f"[bili] 开始下载: {bvid}")
@@ -132,9 +155,12 @@ async def handle(bot: Bot, event: MessageEvent):
                 logger.info(f"[bili] 已删除临时文件: {os.path.basename(mp4)}")
             except OSError:
                 pass
+            if sent == "fail":
+                await _send_fail(bot, event, bvid, session)
             logger.info(f"[bili] 视频已发送({sent}): {bvid} -> {session}")
             return
         logger.warning(f"[bili] 下载失败: {bvid} ({err})")
 
-    # 下载失败：仍发送文字解析信息 + 封面图
+    # 下载失败：失败消息 + 信息卡片
+    await _send_fail(bot, event, bvid, session)
     await _send_info(bot, event, text, info, bvid, session)

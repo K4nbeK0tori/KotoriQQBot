@@ -32,3 +32,8 @@ docker-installer/
 _download.py
 _check.py
 _probe.py
+_gen_xlsx.py
+_xlsx/
+
+# ===== 凭据表（敏感，绝不提交）=====
+*凭据*.xlsx
