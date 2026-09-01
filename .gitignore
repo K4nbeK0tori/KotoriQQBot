@@ -20,3 +20,9 @@ Thumbs.db
 .idea/
 .vscode/
 *.log
+
+# ===== 本地安装包（避免大文件进 git）=====
+docker-installer/
+_download.py
+_check.py
+_probe.py
