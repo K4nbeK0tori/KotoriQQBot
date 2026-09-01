@@ -300,19 +300,36 @@ async def download_video(
     """
     safe = re.sub(r'[\\/:*?"<>|\s]+', "_", title).strip("_")[:40] or bvid
     filename = f"{bvid}_{safe}"
-    page_url = f"https://www.bilibili.com/video/{bvid}"
+    # 加时间戳让每次请求 URL 唯一，绕过 bili-api 的按 URL 去重（409）
+    page_url = f"https://www.bilibili.com/video/{bvid}?t={int(time.time() * 1000)}"
     params = {"url": page_url, "merge": "true", "filename": filename}
     api_url = f"{BILI_API_URL}/api/video/download?{urllib.parse.urlencode(params)}"
 
     try:
         resp_text = await asyncio.to_thread(_http_get_text, api_url)
+        m = re.search(r"任务ID:\s*([0-9a-fA-F-]+)", resp_text)
+        if not m:
+            return None, f"未获取到任务ID: {resp_text[:200]}"
+        task_id = m.group(1)
+    except urllib.error.HTTPError as e:
+        # 409 = 同 URL 任务已存在（时间戳碰撞等极小概率），复用已有任务
+        if e.code == 409:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", "replace")
+            except Exception:
+                pass
+            m = re.search(r"现有任务ID:\s*([0-9a-fA-F-]+)", body) or re.search(
+                r"任务ID:\s*([0-9a-fA-F-]+)", body
+            )
+            if m:
+                task_id = m.group(1)
+            else:
+                return None, f"bili-api 409 且无法解析任务ID: {body[:200]}"
+        else:
+            return None, f"bili-api 请求失败: {e!r}"
     except Exception as e:
         return None, f"bili-api 请求失败: {e!r}"
-
-    m = re.search(r"任务ID:\s*([0-9a-fA-F-]+)", resp_text)
-    if not m:
-        return None, f"未获取到任务ID: {resp_text[:200]}"
-    task_id = m.group(1)
 
     deadline = time.time() + timeout
     while time.time() < deadline:
