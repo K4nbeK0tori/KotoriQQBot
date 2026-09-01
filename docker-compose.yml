@@ -47,14 +47,18 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ---- B站登录管理页（浏览器扫码续 cookie，免 SSH）----
-  bili-web:
-    build: ./bili-web
-    container_name: qqbot-bili-web
+  # ---- 薇欧拉管理台（统一面板壳 + AI 管理 + B站登录）----
+  admin-web:
+    build: ./admin-web
+    container_name: qqbot-admin-web
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8123:8123"   # 仅本机，Caddy 反代公网访问
+      - "127.0.0.1:8133:8133"   # 仅本机，Caddy 反代公网访问
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
     volumes:
+      - ./data:/data                         # AI 配置（角色卡/群开关/管理员，与 bot 共享）
       - ./bili-api/cookies.txt:/data/cookies.txt   # 写入 B站 cookie（与 bili-api 共享）
     logging:
       driver: json-file

@@ -10,6 +10,9 @@ napcat/qq/*
 # ===== 共享下载目录（视频临时文件）=====
 downloads/*
 
+# ===== AI 运行时数据（角色卡/群开关/管理员配置）=====
+data/
+
 # ===== bili-api 运行时文件 =====
 bili-api/cookies.txt
 
