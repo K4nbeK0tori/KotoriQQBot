@@ -76,8 +76,14 @@ services:
       ONEBOT_ACCESS_TOKEN: ${NAPCAT_WS_TOKEN:-}
       # 机器人超管 QQ 号（多个用逗号分隔），可留空
       SUPERUSERS: ${SUPERUSERS:-[]}
+      # AI 对话（DeepSeek）
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      # 初始超级管理员 QQ 号（逗号分隔，仅首次生效）
+      SUPERADMINS: ${SUPERADMINS:-}
     volumes:
       - ./downloads:/downloads               # 共享下载目录（与 napcat 一致）
+      - ./data:/data                         # AI 配置（角色卡/群开关/管理员，与 admin-web 共享）
     logging:
       driver: json-file
       options:

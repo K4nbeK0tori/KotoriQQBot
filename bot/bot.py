@@ -12,6 +12,7 @@ driver = nonebot.get_driver()
 driver.register_adapter(OneBotV11Adapter)
 
 nonebot.load_plugin("plugins.bili_parser")
+nonebot.load_plugin("plugins.ai_chat")
 
 if __name__ == "__main__":
     nonebot.run()
