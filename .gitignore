@@ -19,6 +19,7 @@ __pycache__/
 *.pyo
 .venv/
 bot/.venv/
+_tmp/
 
 # ===== 系统/编辑器 =====
 .DS_Store
