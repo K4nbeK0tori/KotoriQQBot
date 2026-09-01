@@ -1,10 +1,12 @@
 """薇欧拉管理台：统一面板壳 + AI 管理（角色卡/群开关/管理员/调试）+ B站登录。
 
 页面：
-    /          统一面板壳（左侧菜单 + iframe，NapCat 面板也嵌在 /napcat）
-    /admin     AI 管理页
-    /bili      B站登录页
+    /login   账号密码登录页
+    /        统一面板壳（左侧菜单 + iframe）
+    /admin    AI 管理页
+    /bili     B站登录页
 API（JSON）：
+    /api/login、/api/logout
     /api/roles、/api/roles/<name>、/api/default_role
     /api/groups、/api/groups/<gid>
     /api/admins、/api/admins/<qq>
@@ -17,14 +19,83 @@ import io
 import json
 import os
 import re
+import secrets
 import time
 import urllib.request
+from functools import wraps
 
 import qrcode
 import requests
-from flask import Flask, Response, jsonify, request
+from flask import (
+    Flask,
+    Response,
+    jsonify,
+    redirect,
+    request,
+    session,
+)
 
 app = Flask(__name__)
+
+DATA_DIR = "/data"
+ADMIN_DATA = os.path.join(DATA_DIR, "admin_data.json")
+ROLE_DIR = os.path.join(DATA_DIR, "role_cards")
+COOKIE_FILE = "/data/cookies.txt"
+
+# 默认登录账号密码（首次初始化写入 admin_data.json，可在服务器改文件）
+DEFAULT_WEB_USER = "admin"
+DEFAULT_WEB_PASS = "ILoveChara233."
+
+
+def _ensure_web_auth():
+    """初始化登录账号密码与 session 密钥（存 admin_data.json）。"""
+    a = _admin()
+    changed = False
+    if not a.get("web_user"):
+        a["web_user"] = DEFAULT_WEB_USER
+        changed = True
+    if not a.get("web_pass"):
+        a["web_pass"] = DEFAULT_WEB_PASS
+        changed = True
+    if not a.get("web_secret"):
+        a["web_secret"] = secrets.token_hex(32)
+        changed = True
+    if changed:
+        _write_json(ADMIN_DATA, a)
+    app.secret_key = a["web_secret"]
+
+
+def _web_auth_ok(user, password) -> bool:
+    a = _admin()
+    return str(user) == str(a.get("web_user")) and str(password) == str(
+        a.get("web_pass")
+    )
+
+
+def require_auth(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("auth"):
+            if request.path.startswith("/api/"):
+                return jsonify(error="未登录"), 401
+            return redirect("/login")
+        return f(*args, **kwargs)
+
+    return wrapper
+
+
+_ensure_web_auth()
+
+
+@app.before_request
+def _auth_check():
+    """统一 API 登录检查（login/logout 除外）。"""
+    if request.path.startswith("/api/") and request.path not in (
+        "/api/login",
+        "/api/logout",
+    ):
+        if not session.get("auth"):
+            return jsonify(error="未登录"), 401
 
 DATA_DIR = "/data"
 ADMIN_DATA = os.path.join(DATA_DIR, "admin_data.json")
@@ -87,9 +158,10 @@ SHELL_HTML = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>🌸 薇欧拉管理台</title>
+<link rel="stylesheet" href="/static/sakura.css">
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:system-ui,sans-serif; display:flex; height:100vh; background:#fff5f8; }
+  body { font-family:system-ui,sans-serif; display:flex; height:100vh; }
   aside { width:200px; background:linear-gradient(180deg,#ffd9e3,#ffc2d4); padding:18px 0;
           display:flex; flex-direction:column; box-shadow:2px 0 12px rgba(255,150,180,.25); }
   aside .logo { color:#c0557f; font-weight:700; font-size:18px; padding:0 20px 14px; border-bottom:1px solid #ffb9cd; margin-bottom:12px; }
@@ -108,6 +180,7 @@ SHELL_HTML = """<!doctype html>
   <a href="https://napcat.kanbekotori.top/webui" target="_blank">🐱 NapCat 面板</a>
 </aside>
 <main><iframe name="main" src="/admin"></iframe></main>
+<script src="/static/sakura.js"></script>
 </body>
 </html>"""
 
@@ -117,6 +190,7 @@ ADMIN_HTML = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AI 管理</title>
+<link rel="stylesheet" href="/static/sakura.css">
 <style>
   body { font-family:system-ui,sans-serif; background:#fff5f8; color:#4a2b3a; padding:24px; }
   h2 { color:#c0557f; margin:0 0 16px; }
@@ -363,6 +437,7 @@ loadRoles();
 loadGroups();
 loadAdmins();
 </script>
+<script src="/static/sakura.js"></script>
 </body>
 </html>"""
 
@@ -372,6 +447,7 @@ BILI_HTML = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>B站登录</title>
+<link rel="stylesheet" href="/static/sakura.css">
 <style>
   body { font-family:system-ui,sans-serif; background:#fff5f8; color:#4a2b3a; padding:24px; display:flex; justify-content:center; }
   .card { background:#fff; border:1px solid #ffd3e0; border-radius:12px; padding:24px; max-width:380px; width:100%; text-align:center; }
@@ -430,21 +506,89 @@ async function poll() {
   } catch (e) {}
 }
 </script>
+<script src="/static/sakura.js"></script>
 </body>
 </html>"""
 
 
+LOGIN_HTML = """<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>🌸 薇欧拉管理台 · 登录</title>
+<link rel="stylesheet" href="/static/sakura.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card glass">
+    <h1>🌸 薇欧拉管理台</h1>
+    <div class="sub">梦限大的猫娘女仆薇欧拉，为老师服务喵～</div>
+    <input id="user" placeholder="账号" autocomplete="username">
+    <input id="pass" type="password" placeholder="密码" autocomplete="current-password">
+    <button onclick="login()">登 录</button>
+    <div id="err" class="err"></div>
+  </div>
+</div>
+<script>
+async function login() {
+  const user = document.getElementById("user").value.trim();
+  const pass = document.getElementById("pass").value;
+  if (!user || !pass) { document.getElementById("err").textContent = "账号和密码不能为空喵"; return; }
+  try {
+    const r = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user, pass })
+    });
+    const d = await r.json();
+    if (d.ok) { location.href = "/"; }
+    else { document.getElementById("err").textContent = d.error || "登录失败"; }
+  } catch (e) { document.getElementById("err").textContent = "网络错误: " + e; }
+}
+document.getElementById("pass").addEventListener("keydown", e => { if (e.key === "Enter") login(); });
+</script>
+<script src="/static/sakura.js"></script>
+</body>
+</html>"""
+
+
+@app.get("/login")
+def login_page():
+    if session.get("auth"):
+        return redirect("/")
+    return Response(LOGIN_HTML, content_type="text/html; charset=utf-8")
+
+
+@app.post("/api/login")
+def api_login():
+    body = request.get_json(silent=True) or {}
+    if _web_auth_ok(body.get("user", ""), body.get("pass", "")):
+        session["auth"] = True
+        return jsonify(ok=True)
+    return jsonify(error="账号或密码错误喵"), 401
+
+
+@app.post("/api/logout")
+def api_logout():
+    session.clear()
+    return jsonify(ok=True)
+
+
 @app.get("/")
+@require_auth
 def shell():
     return Response(SHELL_HTML, content_type="text/html; charset=utf-8")
 
 
 @app.get("/admin")
+@require_auth
 def admin_page():
     return Response(ADMIN_HTML, content_type="text/html; charset=utf-8")
 
 
 @app.get("/bili")
+@require_auth
 def bili_page():
     return Response(BILI_HTML, content_type="text/html; charset=utf-8")
 
