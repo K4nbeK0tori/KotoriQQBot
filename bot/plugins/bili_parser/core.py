@@ -43,6 +43,14 @@ DOWNLOAD_TIMEOUT = 600  # 单个视频下载/合并总超时（秒）
 _cookie_cache: Dict[str, object] = {"cookie": None, "ts": 0.0}
 COOKIE_TTL = 3600
 
+# playurl 被风控后的全局冷却（窗口限流，撞墙期反复请求只会延长封禁）
+_playurl_cooldown_until: float = 0.0
+PLAYURL_COOLDOWN_SECONDS = 600
+
+
+def _in_playurl_cooldown() -> bool:
+    return time.time() < _playurl_cooldown_until
+
 
 def extract_bvid(
     text: str, json_payloads: Optional[List[str]] = None
@@ -242,12 +250,15 @@ async def download_video(
     if not cookie:
         return None, "获取 B站 cookie 失败"
 
-    # playurl 可能被瞬时风控（view 后连续请求易触发），缓一缓再请求，
-    # 失败则刷新 cookie 并退避重试
+    if _in_playurl_cooldown():
+        return None, "playurl 处于冷却期（此前被风控），已降级"
+
+    # playurl 受时间窗口限流：view 后稍作缓冲再请求；
+    # 失败只重试一次，仍失败则进入冷却，避免反复撞风控
     video_stream = audio_stream = None
     referer = f"https://www.bilibili.com/video/{bvid}"
-    for attempt in range(3):
-        await asyncio.sleep(1.5 + attempt * 0.5)  # view 之后稍作缓冲
+    for attempt in range(2):
+        await asyncio.sleep(1.5 + attempt * 0.5)
         dash_data = await fetch_playurl(bvid, cid, cookie, referer=referer)
         if dash_data:
             v, a = _pick_streams(dash_data)
@@ -255,9 +266,11 @@ async def download_video(
                 video_stream, audio_stream = v, a
                 break
         cookie = _get_buvid_cookie(force=True) or cookie
-        await asyncio.sleep(5 * (attempt + 1))
+        await asyncio.sleep(8 * (attempt + 1))
     if not video_stream:
-        return None, "playurl 获取失败（多次重试后仍被风控）"
+        global _playurl_cooldown_until
+        _playurl_cooldown_until = time.time() + PLAYURL_COOLDOWN_SECONDS
+        return None, "playurl 被风控，已进入 10 分钟冷却"
     v_url = _pick_url(video_stream)
     a_url = _pick_url(audio_stream)
     if not v_url:
