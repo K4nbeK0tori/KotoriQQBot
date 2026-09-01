@@ -1,7 +1,7 @@
 """B站视频解析插件：监听群消息中的哔哩哔哩链接。
 
-流程：提取 BV 号 → 查视频信息 → 下载视频(480p) → 发送群文件 → 删除本地临时文件。
-下载或发送失败时，降级为发送「视频信息 + 封面图」。
+流程：提取 BV 号 → 查视频信息 → 下载视频 → 发送「解析信息 + 视频」→ 删除本地临时文件。
+下载或发送失败时，至少发送「视频信息 + 封面图」。
 """
 
 import asyncio
@@ -42,6 +42,25 @@ def _collect_json_payloads(event: MessageEvent):
             except Exception:
                 continue
     return payloads
+
+
+async def _send_info(
+    bot: Bot, event: MessageEvent, text: str, info, bvid: str, session
+) -> bool:
+    """发送文字解析信息 + 封面图。返回是否成功。"""
+    try:
+        segs = [MessageSegment.text(text)]
+        pic = info.get("pic", "")
+        if pic:
+            img = await download_image_base64(pic)
+            if img:
+                segs.append(MessageSegment.image(img))
+        await bot.send(event, segs)
+        logger.info(f"[bili] 解析信息已发送: {bvid} -> {session}")
+        return True
+    except Exception as e:
+        logger.error(f"[bili] 解析信息发送失败: {bvid} -> {e!r}")
+        return False
 
 
 async def _send_video(bot: Bot, event: MessageEvent, session, mp4_path: str) -> str:
@@ -100,34 +119,22 @@ async def handle(bot: Bot, event: MessageEvent):
     cid = info.get("cid")
     text = build_reply(info, bvid)
 
-    # 主流程：下载视频 → 发文件 → 删除
+    # 主流程：下载视频 → 发解析信息 + 发视频 → 删除
     async with _download_lock:
         logger.info(f"[bili] 开始下载: {bvid}")
         mp4, err = await download_video(bvid, title, cid)
         if mp4:
             logger.info(f"[bili] 下载完成: {mp4}")
+            await _send_info(bot, event, text, info, bvid, session)
             sent = await _send_video(bot, event, session, mp4)
             try:
                 os.remove(mp4)
                 logger.info(f"[bili] 已删除临时文件: {os.path.basename(mp4)}")
             except OSError:
                 pass
-            if sent != "fail":
-                logger.info(f"[bili] 视频已发送({sent}): {bvid} -> {session}")
-                return
-            logger.warning(f"[bili] 发送失败，降级发解析信息: {bvid}")
-        else:
-            logger.warning(f"[bili] 下载失败: {bvid} ({err})")
+            logger.info(f"[bili] 视频已发送({sent}): {bvid} -> {session}")
+            return
+        logger.warning(f"[bili] 下载失败: {bvid} ({err})")
 
-    # 降级：发送视频信息 + 封面图
-    try:
-        segs = [MessageSegment.text(text)]
-        pic = info.get("pic", "")
-        if pic:
-            img = await download_image_base64(pic)
-            if img:
-                segs.append(MessageSegment.image(img))
-        await bot.send(event, segs)
-        logger.info(f"[bili] 解析信息已发送: {bvid} -> {session}")
-    except Exception as e:
-        logger.error(f"[bili] 降级发送失败: {bvid} -> {e!r}")
+    # 下载失败：仍发送文字解析信息 + 封面图
+    await _send_info(bot, event, text, info, bvid, session)
