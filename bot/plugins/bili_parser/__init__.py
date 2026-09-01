@@ -86,12 +86,13 @@ async def handle(bot: Bot, event: MessageEvent):
     _last_handle[session] = now
 
     title = info.get("title", bvid)
+    cid = info.get("cid")
     text = build_reply(info, bvid)
 
     # 主流程：下载视频 → 发文件 → 删除
     async with _download_lock:
         logger.info(f"[bili] 开始下载: {bvid}")
-        mp4, err = await download_video(bvid, title)
+        mp4, err = await download_video(bvid, title, cid)
         if mp4:
             logger.info(f"[bili] 下载完成: {mp4}")
             sent = await _send_file(bot, event, session, mp4)
