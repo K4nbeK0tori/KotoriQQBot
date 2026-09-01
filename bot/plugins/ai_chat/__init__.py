@@ -38,7 +38,7 @@ DEEPSEEK_URL = os.environ.get("DEEPSEEK_URL", "https://api.deepseek.com/v1/chat/
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 
 MAX_HISTORY = 20   # 每群保留的最近轮数
-CHAT_COOLDOWN = 15  # 群内对话冷却（秒）
+CHAT_COOLDOWN = 0  # 聊天冷却（秒），0 = 不限制
 MAX_CONTENT = 500  # 单条输入最大长度
 
 TRIGGER_WORDS = ("薇欧拉", "薇欧拉酱", "viola")
