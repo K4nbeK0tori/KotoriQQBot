@@ -44,8 +44,19 @@ def _collect_json_payloads(event: MessageEvent):
     return payloads
 
 
-async def _send_file(bot: Bot, event: MessageEvent, session, mp4_path: str) -> bool:
-    """通过 NapCat 上传群/私聊文件。返回是否成功。"""
+async def _send_video(bot: Bot, event: MessageEvent, session, mp4_path: str) -> str:
+    """发送视频：优先发视频消息（聊天内直接播放），失败降级发群文件。
+
+    返回 "video" / "file" / "fail"。
+    """
+    # 1. 视频消息（聊天内显示视频卡片）
+    try:
+        await bot.send(event, MessageSegment.video(file=mp4_path))
+        return "video"
+    except Exception as e:
+        logger.warning(f"[bili] 视频消息发送失败: {e!r}，降级发群文件")
+
+    # 2. 群文件（兜底，大小限制更宽松）
     name = os.path.basename(mp4_path)
     try:
         if hasattr(event, "group_id"):
@@ -56,10 +67,10 @@ async def _send_file(bot: Bot, event: MessageEvent, session, mp4_path: str) -> b
             await bot.call_api(
                 "upload_private_file", user_id=session, file=mp4_path, name=name
             )
-        return True
+        return "file"
     except Exception as e:
-        logger.warning(f"[bili] 上传文件失败: {e!r}")
-        return False
+        logger.warning(f"[bili] 群文件也失败: {e!r}")
+        return "fail"
 
 
 @matcher.handle()
@@ -95,16 +106,16 @@ async def handle(bot: Bot, event: MessageEvent):
         mp4, err = await download_video(bvid, title, cid)
         if mp4:
             logger.info(f"[bili] 下载完成: {mp4}")
-            sent = await _send_file(bot, event, session, mp4)
+            sent = await _send_video(bot, event, session, mp4)
             try:
                 os.remove(mp4)
                 logger.info(f"[bili] 已删除临时文件: {os.path.basename(mp4)}")
             except OSError:
                 pass
-            if sent:
-                logger.info(f"[bili] 视频已发送: {bvid} -> {session}")
+            if sent != "fail":
+                logger.info(f"[bili] 视频已发送({sent}): {bvid} -> {session}")
                 return
-            logger.warning(f"[bili] 文件发送失败，降级发解析信息: {bvid}")
+            logger.warning(f"[bili] 发送失败，降级发解析信息: {bvid}")
         else:
             logger.warning(f"[bili] 下载失败: {bvid} ({err})")
 
