@@ -13,7 +13,8 @@ RUN apt-get update \
 
 # 构建时拉取第三方代码（服务器可访问 GitHub）
 RUN git clone --depth 1 https://github.com/Suxiaoqinx/bilibili.git /app \
-    && rm -rf /app/.git
+    && rm -rf /app/.git \
+    && sed -i "s/Chrome\/91.0.4472.124 Safari\/537.36/Chrome\/126.0.0.0 Safari\/537.36/" /app/bilibili.py
 
 RUN pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 

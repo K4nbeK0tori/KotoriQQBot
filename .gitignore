@@ -10,6 +10,9 @@ napcat/qq/*
 # ===== 共享下载目录（视频临时文件）=====
 downloads/*
 
+# ===== bili-api 运行时文件 =====
+bili-api/cookies.txt
+
 # ===== Python =====
 __pycache__/
 *.pyc

@@ -39,8 +39,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./downloads:/app/downloads   # 下载目录（与 napcat/bot 共享）
-      # 可选：挂载 cookies.txt 提升稳定性/清晰度
-      # - ./bili-api/cookies.txt:/app/cookies.txt
+      - ./bili-api/cookies.txt:/app/cookies.txt   # buvid cookie（降低 B站风控概率）
     # 不映射任何端口：仅 compose 内网访问 bili-api:8000
     logging:
       driver: json-file
