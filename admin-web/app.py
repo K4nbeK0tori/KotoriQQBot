@@ -105,7 +105,7 @@ SHELL_HTML = """<!doctype html>
   <div class="logo">🌸 薇欧拉管理台</div>
   <a href="/admin" target="main">🤖 AI 管理</a>
   <a href="/bili" target="main">🎬 B站登录</a>
-  <a href="/napcat/webui" target="main">🐱 NapCat 面板</a>
+  <a href="/napcat/webui/" target="main">🐱 NapCat 面板</a>
 </aside>
 <main><iframe name="main" src="/admin"></iframe></main>
 </body>
