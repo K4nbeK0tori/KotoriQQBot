@@ -315,15 +315,17 @@ async def _msg_chat(bot: Bot, event: MessageEvent):
 
     # 调试日志：打印消息段结构，确认 at 段实际内容
     segs_desc = "; ".join(f"{s.type}:{json.dumps(s.data, ensure_ascii=False)}" for s in event.message)
-    msg_str = str(event.message)
-    logger.info(f"[ai] 收到消息 text={text!r} msg_str={msg_str[:200]!r} segments=[{segs_desc[:200]}]")
+    raw_msg = getattr(event, "raw_message", "") or str(event.message)
+    logger.info(f"[ai] 收到消息 text={text!r} raw={raw_msg[:150]!r} segments=[{segs_desc[:150]}]")
 
-    # 触发判断：@机器人（从消息字符串解析 at 的 qq，不依赖段遍历）
+    # 触发判断：@机器人（优先用 raw_message 的 CQ 码，兼容段丢失；to_me 兜底）
     at_me = False
-    for q in re.findall(r"\[CQ:at,qq=(\d+)\]", msg_str):
+    for q in re.findall(r"\[CQ:at,qq=(\d+)\]", raw_msg):
         if q in (str(bot.self_id), str(event.self_id)):
             at_me = True
-    logger.info(f"[ai] at_me={at_me} self_id={bot.self_id}/{event.self_id}")
+    if not at_me:
+        at_me = bool(getattr(event, "to_me", False))
+    logger.info(f"[ai] at_me={at_me} to_me={getattr(event, 'to_me', None)} self_id={bot.self_id}")
 
     if at_me and not text:
         # 纯 @ 没带话
