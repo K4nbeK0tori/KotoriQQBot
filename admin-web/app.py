@@ -175,8 +175,14 @@ SHELL_HTML = """<!doctype html>
   <a href="/admin" target="main">🤖 AI 管理</a>
   <a href="/bili" target="main">🎬 B站登录</a>
   <a href="https://napcat.kanbekotori.top/webui" target="_blank">🐱 NapCat 面板</a>
+  <a href="javascript:logout()" style="margin-top:auto;border-top:1px solid #ffb9cd;padding-top:14px;">🚪 退出登录</a>
 </aside>
 <main><iframe name="main" src="/admin"></iframe></main>
+<script>
+function logout() {
+  fetch("/api/logout", { method: "POST" }).then(() => { location.href = "/login"; });
+}
+</script>
 <script src="/static/sakura.js"></script>
 </body>
 </html>"""
@@ -256,6 +262,12 @@ ADMIN_HTML = """<!doctype html>
   <input id="test-prompt" placeholder="你好呀" style="width:260px">
   <button onclick="testApi()">🧪 测试</button>
   <div id="test-result" style="margin-top:8px;font-size:13px;white-space:pre-wrap;"></div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">📊 Token 用量（近 14 天）</h3>
+  <div id="usage-chart" style="display:flex;align-items:flex-end;gap:6px;height:140px;padding:10px 0;"></div>
+  <div id="usage-total" style="font-size:13px;color:#8a5a70;margin-top:6px;"></div>
 </div>
 
 <script>
@@ -430,9 +442,33 @@ async function testApi() {
   } catch (e) { el.textContent = "❌ " + e.message; }
 }
 
+async function loadUsage() {
+  try {
+    const d = await api("/api/usage");
+    const chart = $("usage-chart");
+    chart.innerHTML = "";
+    const days = d.days || [];
+    const max = Math.max(1, ...days.map(x => x.prompt + x.completion));
+    for (const item of days) {
+      const total = item.prompt + item.completion;
+      const h = Math.max(4, Math.round((total / max) * 110));
+      const col = document.createElement("div");
+      col.style.cssText = "display:flex;flex-direction:column;align-items:center;flex:1;gap:4px;";
+      col.innerHTML =
+        `<div style="width:100%;height:${h}px;background:linear-gradient(180deg,#ff9eb8,#e87ba5);border-radius:6px 6px 0 0;" title="${item.day}: ${total} tokens"></div>` +
+        `<div style="font-size:10px;color:#a07a8c;transform:rotate(-30deg);white-space:nowrap;">${item.day.slice(5)}</div>`;
+      chart.appendChild(col);
+    }
+    $("usage-total").textContent = "近 14 天累计：约 " + (d.total || 0) + " tokens";
+  } catch (e) {
+    $("usage-total").textContent = "用量数据读取失败";
+  }
+}
+
 loadRoles();
 loadGroups();
 loadAdmins();
+loadUsage();
 </script>
 <script src="/static/sakura.js"></script>
 </body>
@@ -717,6 +753,22 @@ def api_test():
         return jsonify(reply=data["choices"][0]["message"]["content"])
     except Exception as e:
         return jsonify(error=repr(e)), 502
+
+
+@app.get("/api/usage")
+def api_usage():
+    """Token 用量统计（按天），供面板图表展示。"""
+    path = os.path.join(DATA_DIR, "usage.json")
+    data = _read_json(path, {})
+    days = sorted(data.keys())[-14:]
+    result = []
+    for d in days:
+        u = data[d]
+        result.append(
+            {"day": d, "prompt": u.get("prompt", 0), "completion": u.get("completion", 0)}
+        )
+    total = sum(x["prompt"] + x["completion"] for x in result)
+    return jsonify({"days": result, "total": total})
 
 
 # ===== B站扫码登录 =====

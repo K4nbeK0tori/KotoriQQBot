@@ -43,25 +43,34 @@ MAX_CONTENT = 500  # 单条输入最大长度
 
 TRIGGER_WORDS = ("薇欧拉", "薇欧拉酱", "viola")
 
-# 内置默认角色（role_cards 目录不存在或没有该卡时兜底）
-DEFAULT_ROLE = {
-    "name": "薇欧拉",
-    "description": "来自梦限大的猫娘女仆机器人，温柔俏皮，说话带喵。",
-    "system": (
-        "你是薇欧拉，来自梦限大的猫娘女仆机器人。"
-        "性格温柔、俏皮，带一点小傲娇，说话喜欢在句尾带\"喵\"。"
-        "你称呼用户为\"老师\"，自称\"薇欧拉\"。"
-        "你在QQ群里帮老师们解决问题，会认真回答，也会开玩笑。"
-        "回复保持简洁自然，一般2到4句话，不要长篇大论，不要使用markdown。"
-        "根据对话内容自然回应，始终维持猫娘女仆的角色设定。"
-    ),
-}
-
 # 每群上下文
 _contexts: Dict[str, List[dict]] = {}
 _last_chat: Dict[str, float] = {}
 
 # ===== 数据读写 =====
+
+USAGE_FILE = os.path.join(DATA_DIR, "usage.json")
+
+
+def _record_usage(prompt_tokens: int, completion_tokens: int):
+    """按天累计 DeepSeek token 用量（写入 /data/usage.json，面板图表用）。"""
+    try:
+        data = {}
+        try:
+            with open(USAGE_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            pass
+        day = time.strftime("%Y-%m-%d")
+        d = data.setdefault(day, {"prompt": 0, "completion": 0})
+        d["prompt"] += int(prompt_tokens or 0)
+        d["completion"] += int(completion_tokens or 0)
+        tmp = USAGE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, USAGE_FILE)
+    except Exception as e:
+        logger.warning(f"[ai] 记录 usage 失败: {e!r}")
 
 
 def _load_admin_data() -> dict:
@@ -114,7 +123,8 @@ def _is_superadmin(qq) -> bool:
 # ===== DeepSeek =====
 
 
-async def _chat(system: str, history: List[dict]) -> Optional[str]:
+async def _chat(system: str, history: List[dict]) -> tuple:
+    """调用 DeepSeek，返回 (回复内容, usage 字典)。失败返回 (None, {})。"""
     if not DEEPSEEK_API_KEY:
         return None
     payload = {
@@ -137,22 +147,26 @@ async def _chat(system: str, history: List[dict]) -> Optional[str]:
 
     try:
         data = await asyncio.wait_for(asyncio.to_thread(_do), timeout=100)
-        return data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"]["content"]
+        usage = data.get("usage") or {}
+        return content, usage
     except Exception as e:
         logger.error(f"[ai] DeepSeek 调用失败: {e!r}")
-        return None
+        return None, {}
 
 
 async def _do_chat(bot: Bot, event: MessageEvent, content: str, gid: str):
-    role = _load_role(_group_role(gid)) or DEFAULT_ROLE
-    system = role.get("system") or DEFAULT_ROLE["system"]
+    # 只用角色卡（无内置提示词）；没配角色卡时 system 为空
+    role = _load_role(_group_role(gid))
+    system = (role or {}).get("system", "")
 
     history = _contexts.setdefault(gid, [])
     history.append({"role": "user", "content": content})
     history = history[-MAX_HISTORY:]
 
-    reply = await _chat(system, history)
+    reply, usage = await _chat(system, history)
     if reply:
+        _record_usage(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
         history.append({"role": "assistant", "content": reply})
         _contexts[gid] = history[-MAX_HISTORY:]
         try:
@@ -247,7 +261,10 @@ async def _role_cmd(bot: Bot, event: MessageEvent):
     gid = str(event.group_id)
     if not arg:
         name = _group_role(gid)
-        role = _load_role(name) or DEFAULT_ROLE
+        role = _load_role(name)
+        if not role:
+            await bot.send(event, f"本群角色卡「{name}」不存在，请在管理面板创建喵")
+            return
         await bot.send(
             event,
             MessageSegment.text(
@@ -282,30 +299,36 @@ async def _msg_chat(bot: Bot, event: MessageEvent):
     if not isinstance(event, GroupMessageEvent):
         return
     gid = str(event.group_id)
-    if not _group_enabled(gid):
-        return
     text = event.get_plaintext().strip()
     if not text:
         return
 
     # 触发判断：@机器人
+    at_me = any(
+        seg.type == "at" and str(seg.data.get("qq")) == str(bot.self_id)
+        for seg in event.message
+    )
     content = None
-    for seg in event.message:
-        if seg.type == "at" and str(seg.data.get("qq")) == str(bot.self_id):
-            content = re.sub(r"\[CQ:at[^\]]*\]", "", text).strip()
-            break
-    # 触发判断：文字含触发词
-    if content is None:
+    if at_me:
+        content = text  # plaintext 不含 at 段，剩下的就是对话内容
+    else:
+        # 触发判断：文字含触发词
         for w in TRIGGER_WORDS:
             if w in text:
                 content = re.sub(
-                    rf"^(?:{w}[ \t]*[,，:：]?[ \t]*|.*?{w}[ \t]*[,，:：]?[ \t]*)",
-                    "",
-                    text,
-                    count=1,
+                    rf"^{w}[ \t]*[,，:：]?[ \t]*", "", text, count=1
                 ).strip()
                 break
     if not content:
+        return
+
+    # 群开关
+    if not _group_enabled(gid):
+        if at_me:
+            try:
+                await bot.send(event, "本群AI还没开启喵，让管理员发 /ai on 开启一下哦")
+            except Exception:
+                pass
         return
 
     now = time.time()
