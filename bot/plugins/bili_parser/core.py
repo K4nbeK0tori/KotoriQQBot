@@ -14,6 +14,7 @@
 
 import asyncio
 import base64
+import hashlib
 import json
 import os
 import re
@@ -31,10 +32,28 @@ BILI_LINK_RE = re.compile(
 
 API_VIEW = "https://api.bilibili.com/x/web-interface/view"
 API_SPI = "https://api.bilibili.com/x/frontend/finger/spi"
-API_PLAYURL = "https://api.bilibili.com/x/player/playurl"
+API_NAV = "https://api.bilibili.com/x/web-interface/nav"
+API_PLAYURL = "https://api.bilibili.com/x/player/wbi/playurl"
 
-UA = "curl/8.5.0"
+UA = "curl/8.5.0"  # view/spi 等接口用（curl UA 实测可过 412 风控）
+UA_BROWSER = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)  # playurl 用完整浏览器指纹（wbi 接口实测可用）
 REFERER = "https://www.bilibili.com/"
+
+# wbi 签名参数（mixin key 置换表，B站公开算法）
+MIXIN_KEY_ENC_TAB = [
+    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+    33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61,
+    26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36,
+    20, 34, 44, 52,
+]
+# wbi key 兜底（2026-09 验证有效；优先从 nav 动态获取）
+_FALLBACK_WBI_KEYS = (
+    "7cd084941338484aae1ad9425b84077c",
+    "4932caff0ff746eab6f01bf08b70ac45",
+)
 
 DOWNLOAD_DIR = "/downloads"
 DOWNLOAD_TIMEOUT = 600  # 单个视频下载/合并总超时（秒）
@@ -138,25 +157,49 @@ def _get_buvid_cookie(force: bool = False) -> Optional[str]:
     return None
 
 
+def _get_wbi_keys() -> Tuple[str, str]:
+    """获取 wbi img/sub key：优先从 nav 动态获取（未登录也返回），失败用兜底。"""
+    try:
+        payload = _http_get_json(API_NAV)
+        wbi = (payload.get("data") or {}).get("wbi_img") or {}
+        img_key = (wbi.get("img_url") or "").rsplit("/", 1)[-1].split(".")[0]
+        sub_key = (wbi.get("sub_url") or "").rsplit("/", 1)[-1].split(".")[0]
+        if len(img_key) == 32 and len(sub_key) == 32:
+            return img_key, sub_key
+    except Exception:
+        pass
+    return _FALLBACK_WBI_KEYS
+
+
+def _sign_wbi(params: Dict, img_key: str, sub_key: str) -> Dict:
+    """按 B站 wbi 算法签名参数，返回带 wts / w_rid 的新参数字典。"""
+    signed = dict(params)
+    signed["wts"] = int(time.time())
+    mixin = "".join((img_key + sub_key)[i] for i in MIXIN_KEY_ENC_TAB)[:32]
+    qs = urllib.parse.urlencode(sorted(signed.items()))
+    signed["w_rid"] = hashlib.md5((qs + mixin).encode()).hexdigest()
+    return signed
+
+
 async def fetch_playurl(
     bvid: str, cid: int, cookie: str, referer: Optional[str] = None
 ) -> Optional[Dict]:
-    """调用 playurl 接口获取 dash 音视频流（无需 wbi 签名，2026-09 验证）。
-
-    referer 建议传具体视频页 URL，更贴近真实浏览器请求，降低风控概率。
-    """
-    params = urllib.parse.urlencode(
-        {"bvid": bvid, "cid": cid, "fnval": 16, "fourk": 0}
-    )
-    url = f"{API_PLAYURL}?{params}"
+    """调用 wbi 签名版 playurl 接口获取 dash 音视频流（完整浏览器指纹请求）。"""
+    params = {"bvid": bvid, "cid": cid, "fnval": 16, "fourk": 0}
+    img_key, sub_key = _get_wbi_keys()
+    signed = _sign_wbi(params, img_key, sub_key)
+    url = f"{API_PLAYURL}?{urllib.parse.urlencode(sorted(signed.items()))}"
 
     def _do():
         req = urllib.request.Request(
             url,
             headers={
-                "User-Agent": UA,
-                "Referer": referer or REFERER,
+                "User-Agent": UA_BROWSER,
+                "Referer": referer or f"https://www.bilibili.com/video/{bvid}",
                 "Cookie": cookie,
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "zh-CN,zh;q=0.9",
+                "Origin": "https://www.bilibili.com",
             },
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
