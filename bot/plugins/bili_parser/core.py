@@ -109,10 +109,14 @@ async def fetch_video(bvid: str) -> Optional[Dict]:
         return None
 
 
-def _get_buvid_cookie() -> Optional[str]:
-    """从 spi 接口获取 buvid3/buvid4 cookie（带缓存）。"""
+def _get_buvid_cookie(force: bool = False) -> Optional[str]:
+    """从 spi 接口获取 buvid3/buvid4 cookie（默认带缓存，force 强制刷新）。"""
     now = time.time()
-    if _cookie_cache["cookie"] and now - _cookie_cache["ts"] < COOKIE_TTL:
+    if (
+        not force
+        and _cookie_cache["cookie"]
+        and now - _cookie_cache["ts"] < COOKIE_TTL
+    ):
         return _cookie_cache["cookie"]
     try:
         payload = _http_get_json(API_SPI)
@@ -229,12 +233,19 @@ async def download_video(
     if not cookie:
         return None, "获取 B站 cookie 失败"
 
-    dash_data = await fetch_playurl(bvid, cid, cookie)
-    if not dash_data:
-        return None, "playurl 获取失败（可能被风控）"
-    video_stream, audio_stream = _pick_streams(dash_data)
+    # playurl 可能被瞬时风控，失败则刷新 cookie 并退避重试
+    video_stream = audio_stream = None
+    for attempt in range(3):
+        dash_data = await fetch_playurl(bvid, cid, cookie)
+        if dash_data:
+            v, a = _pick_streams(dash_data)
+            if v:
+                video_stream, audio_stream = v, a
+                break
+        cookie = _get_buvid_cookie(force=True) or cookie
+        await asyncio.sleep(3 * (attempt + 1))
     if not video_stream:
-        return None, "未找到可用的视频流"
+        return None, "playurl 获取失败（多次重试后仍被风控）"
     v_url = _pick_url(video_stream)
     a_url = _pick_url(audio_stream)
     if not v_url:
