@@ -53,6 +53,14 @@ git push -u origin main
 
 ## 第二步：服务器部署（Debian 13）
 
+> **私有仓库的克隆认证**：GitHub 已禁用密码登录，服务器上 clone/pull 私有仓库
+> 需要用 PAT（个人访问令牌）作为密码。在服务器上先执行一次：
+> ```bash
+> git config --global credential.helper store
+> # 之后 clone 提示输入用户名时填 GitHub 用户名，密码填 PAT（ghp_... 开头）
+> # 凭据会保存，后续 git pull 不再询问
+> ```
+
 ### 1. 准备环境（一次性）
 
 ```bash
