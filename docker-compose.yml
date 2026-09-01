@@ -22,7 +22,7 @@ services:
       - "127.0.0.1:3001:3001"
     volumes:
       - ./napcat/config:/app/napcat/config   # NapCat 配置（含 onebot11.json）
-      - ./napcat/qq:/root/.config/QQ         # QQ 客户端数据（登录态）
+      - ./napcat/qq:/app/.config/QQ          # QQ 客户端数据/登录态（NapCat 4.x 实际路径，日志确认）
       - ./downloads:/downloads               # 共享下载目录：bot 下载、NapCat 读取发群文件
     extra_hosts:
       - "host.docker.internal:host-gateway"
