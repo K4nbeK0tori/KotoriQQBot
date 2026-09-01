@@ -71,6 +71,35 @@ async def _send_fail(bot: Bot, event: MessageEvent, bvid: str, session) -> bool:
         return False
 
 
+async def _send_forward(
+    bot: Bot, event: MessageEvent, session, text: str, info, mp4_path: str
+) -> bool:
+    """把信息卡 + 封面 + 视频整合为一条合并转发（聊天记录）发送。返回是否成功。"""
+    nodes = [
+        MessageSegment.node_custom(0, "薇欧拉", MessageSegment.text(text)),
+    ]
+    pic = info.get("pic", "")
+    if pic:
+        img = await download_image_base64(pic)
+        if img:
+            nodes.append(MessageSegment.node_custom(0, "薇欧拉", MessageSegment.image(img)))
+    nodes.append(MessageSegment.node_custom(0, "薇欧拉", MessageSegment.video(file=mp4_path)))
+    try:
+        if hasattr(event, "group_id"):
+            await bot.call_api(
+                "send_group_forward_msg", group_id=session, messages=nodes
+            )
+        else:
+            await bot.call_api(
+                "send_private_forward_msg", user_id=session, messages=nodes
+            )
+        logger.info(f"[bili] 合并转发已发送: {os.path.basename(mp4_path)} -> {session}")
+        return True
+    except Exception as e:
+        logger.warning(f"[bili] 合并转发失败: {e!r}")
+        return False
+
+
 async def _send_info(
     bot: Bot, event: MessageEvent, text: str, info, bvid: str, session
 ) -> bool:
@@ -162,14 +191,18 @@ async def handle(bot: Bot, event: MessageEvent):
         mp4, err = await download_video(bvid, title, cid)
         if mp4:
             logger.info(f"[bili] 下载完成: {mp4}")
-            await _send_info(bot, event, text, info, bvid, session)
-            sent = await _send_video(bot, event, session, mp4)
+            # 优先：信息卡+封面+视频 合并转发为一条聊天记录
+            sent = await _send_forward(bot, event, session, text, info, mp4)
+            if not sent:
+                # 降级：分开发信息卡和视频
+                await _send_info(bot, event, text, info, bvid, session)
+                sent = await _send_video(bot, event, session, mp4)
             try:
                 os.remove(mp4)
                 logger.info(f"[bili] 已删除临时文件: {os.path.basename(mp4)}")
             except OSError:
                 pass
-            if sent != "fail":
+            if sent:
                 await _recall(bot, tip_msg_id)  # 视频发出，撤回剪辑提示
             else:
                 await _send_fail(bot, event, bvid, session)

@@ -393,14 +393,16 @@ def format_count(n: int) -> str:
 
 
 def build_reply(info: Dict, bvid: str) -> str:
-    """把 view 接口返回的视频信息拼成群消息文本。"""
+    """把 view 接口返回的视频信息拼成群消息文本（薇欧拉台词开场）。"""
     title = info.get("title", "未知标题")
     owner = (info.get("owner") or {}).get("name", "未知UP主")
     stat = info.get("stat") or {}
     duration = format_duration(info.get("duration", 0))
     url = f"https://www.bilibili.com/video/{bvid}"
     return (
-        f"【B站视频】\n"
+        "（出示视频）是不是这个原因呢？\n"
+        "在网络的各个角落每天都有人在放火，\n"
+        "真是令人发笑呢！\n\n"
         f"标题：{title}\n"
         f"UP主：{owner}\n"
         f"时长：{duration} ｜ 播放：{format_count(stat.get('view', 0))} "
