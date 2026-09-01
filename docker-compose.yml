@@ -47,6 +47,21 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # ---- B站登录管理页（浏览器扫码续 cookie，免 SSH）----
+  bili-web:
+    build: ./bili-web
+    container_name: qqbot-bili-web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8123:8123"   # 仅本机，Caddy 反代公网访问
+    volumes:
+      - ./bili-api/cookies.txt:/data/cookies.txt   # 写入 B站 cookie（与 bili-api 共享）
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # ---- 逻辑端：NoneBot2 + B站解析 ----
   bot:
     build: ./bot
