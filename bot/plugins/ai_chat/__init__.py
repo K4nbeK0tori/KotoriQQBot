@@ -300,18 +300,37 @@ async def _msg_chat(bot: Bot, event: MessageEvent):
         return
     gid = str(event.group_id)
     text = event.get_plaintext().strip()
-    if not text:
+
+    # 调试日志：打印消息段结构，确认 at 段实际内容
+    segs_desc = "; ".join(f"{s.type}:{json.dumps(s.data, ensure_ascii=False)}" for s in event.message)
+    logger.info(f"[ai] 收到消息 text={text!r} segments=[{segs_desc[:300]}]")
+
+    # 触发判断：@机器人（按 at 段的 qq 号判定，不依赖名字）
+    at_me = False
+    for seg in event.message:
+        if seg.type != "at":
+            continue
+        qq = str(seg.data.get("qq", ""))
+        logger.info(
+            f"[ai] at段 qq={qq!r} bot.self_id={bot.self_id!r} event.self_id={event.self_id!r}"
+        )
+        if qq and qq != "all" and qq in (str(bot.self_id), str(event.self_id)):
+            at_me = True
+
+    if at_me and not text:
+        # 纯 @ 没带话
+        try:
+            await bot.send(event, "喊妈妈什么事喵？")
+        except Exception:
+            pass
         return
 
-    # 触发判断：@机器人
-    at_me = any(
-        seg.type == "at" and str(seg.data.get("qq")) == str(bot.self_id)
-        for seg in event.message
-    )
     content = None
     if at_me:
         content = text  # plaintext 不含 at 段，剩下的就是对话内容
     else:
+        if not text:
+            return
         # 触发判断：文字含触发词
         for w in TRIGGER_WORDS:
             if w in text:
