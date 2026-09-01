@@ -47,6 +47,19 @@ def _collect_json_payloads(event: MessageEvent):
 FAIL_MSG = "哎呀，老师的视频剪辑失败了呢，需要我给你讲个小故事吗，比如“人类与火的故事？”"
 
 
+async def _recall(bot: Bot, msg_id) -> bool:
+    """撤回一条消息（机器人自己发的）。msg_id 为空则跳过。"""
+    if not msg_id:
+        return False
+    try:
+        await bot.call_api("delete_msg", message_id=msg_id)
+        logger.info("[bili] 已撤回剪辑提示")
+        return True
+    except Exception as e:
+        logger.warning(f"[bili] 撤回剪辑提示失败: {e!r}")
+        return False
+
+
 async def _send_fail(bot: Bot, event: MessageEvent, bvid: str, session) -> bool:
     """发送剪辑失败提示。返回是否成功。"""
     try:
@@ -133,9 +146,10 @@ async def handle(bot: Bot, event: MessageEvent):
     cid = info.get("cid")
     text = build_reply(info, bvid)
 
-    # 下载提示
+    # 下载提示（记录消息 ID，视频发出后撤回）
+    tip_msg_id = None
     try:
-        await bot.send(
+        tip_msg_id = await bot.send(
             event,
             MessageSegment.text(f"已经收到老师发送的（{bvid}），薇欧拉酱正在善意剪辑哦~"),
         )
@@ -155,7 +169,9 @@ async def handle(bot: Bot, event: MessageEvent):
                 logger.info(f"[bili] 已删除临时文件: {os.path.basename(mp4)}")
             except OSError:
                 pass
-            if sent == "fail":
+            if sent != "fail":
+                await _recall(bot, tip_msg_id)  # 视频发出，撤回剪辑提示
+            else:
                 await _send_fail(bot, event, bvid, session)
             logger.info(f"[bili] 视频已发送({sent}): {bvid} -> {session}")
             return
