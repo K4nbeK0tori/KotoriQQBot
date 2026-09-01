@@ -1,0 +1,22 @@
+# ===== 敏感配置（含 token，绝不提交）=====
+.env
+
+# ===== NapCat 运行时数据（含 QQ 登录态、账号配置）=====
+napcat/config/*
+napcat/qq/*
+!napcat/config/.gitkeep
+!napcat/qq/.gitkeep
+
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+bot/.venv/
+
+# ===== 系统/编辑器 =====
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

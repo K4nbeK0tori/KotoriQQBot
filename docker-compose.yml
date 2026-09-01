@@ -1,0 +1,52 @@
+# =============================================================
+# QQ 机器人：NapCat（协议端）+ NoneBot2（逻辑端）
+# 端口策略：所有对外端口一律绑定 127.0.0.1，与 xray(443) 零冲突
+# =============================================================
+name: qqbot
+
+services:
+  # ---- 协议端：NapCatQQ（OneBot 11 实现）----
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    container_name: qqbot-napcat
+    restart: unless-stopped
+    environment:
+      NAPCAT_UID: ${NAPCAT_UID:-1000}        # 与服务器运行用户 uid 保持一致
+      NAPCAT_GID: ${NAPCAT_GID:-1000}
+      NAPCAT_WEBUI_TOKEN: ${NAPCAT_WEBUI_TOKEN:-}  # WebUI 访问 token
+    ports:
+      # WebUI（登录/管理），仅本机可见，通过 ssh 隧道访问
+      - "127.0.0.1:6099:6099"
+      # OneBot 11 正向 WS，仅本机可见；bot 容器走 compose 内网直连 napcat:3001，
+      # 这个映射只是留给宿主机调试用，公网完全不可达
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - ./napcat/config:/app/napcat/config   # NapCat 配置（含 onebot11.json）
+      - ./napcat/qq:/root/.config/QQ         # QQ 客户端数据（登录态）
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---- 逻辑端：NoneBot2 + B站解析 ----
+  bot:
+    build: ./bot
+    container_name: qqbot-bot
+    restart: unless-stopped
+    depends_on:
+      - napcat
+    environment:
+      # bot 以 WS 客户端身份连接 NapCat（compose 内网直连，无需任何端口映射）
+      ONEBOT_WS_URLS: '["ws://napcat:3001"]'
+      # 若在 NapCat WebUI 里给 WS 配了 token，这里填同一个
+      ONEBOT_ACCESS_TOKEN: ${NAPCAT_WS_TOKEN:-}
+      # 机器人超管 QQ 号（多个用逗号分隔），可留空
+      SUPERUSERS: ${SUPERUSERS:-}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
