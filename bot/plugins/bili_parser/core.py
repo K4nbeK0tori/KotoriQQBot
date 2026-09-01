@@ -130,8 +130,13 @@ def _get_buvid_cookie(force: bool = False) -> Optional[str]:
     return None
 
 
-async def fetch_playurl(bvid: str, cid: int, cookie: str) -> Optional[Dict]:
-    """调用 playurl 接口获取 dash 音视频流（无需 wbi 签名，2026-09 验证）。"""
+async def fetch_playurl(
+    bvid: str, cid: int, cookie: str, referer: Optional[str] = None
+) -> Optional[Dict]:
+    """调用 playurl 接口获取 dash 音视频流（无需 wbi 签名，2026-09 验证）。
+
+    referer 建议传具体视频页 URL，更贴近真实浏览器请求，降低风控概率。
+    """
     params = urllib.parse.urlencode(
         {"bvid": bvid, "cid": cid, "fnval": 16, "fourk": 0}
     )
@@ -140,7 +145,11 @@ async def fetch_playurl(bvid: str, cid: int, cookie: str) -> Optional[Dict]:
     def _do():
         req = urllib.request.Request(
             url,
-            headers={"User-Agent": UA, "Referer": REFERER, "Cookie": cookie},
+            headers={
+                "User-Agent": UA,
+                "Referer": referer or REFERER,
+                "Cookie": cookie,
+            },
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -233,17 +242,20 @@ async def download_video(
     if not cookie:
         return None, "获取 B站 cookie 失败"
 
-    # playurl 可能被瞬时风控，失败则刷新 cookie 并退避重试
+    # playurl 可能被瞬时风控（view 后连续请求易触发），缓一缓再请求，
+    # 失败则刷新 cookie 并退避重试
     video_stream = audio_stream = None
+    referer = f"https://www.bilibili.com/video/{bvid}"
     for attempt in range(3):
-        dash_data = await fetch_playurl(bvid, cid, cookie)
+        await asyncio.sleep(1.5 + attempt * 0.5)  # view 之后稍作缓冲
+        dash_data = await fetch_playurl(bvid, cid, cookie, referer=referer)
         if dash_data:
             v, a = _pick_streams(dash_data)
             if v:
                 video_stream, audio_stream = v, a
                 break
         cookie = _get_buvid_cookie(force=True) or cookie
-        await asyncio.sleep(3 * (attempt + 1))
+        await asyncio.sleep(5 * (attempt + 1))
     if not video_stream:
         return None, "playurl 获取失败（多次重试后仍被风控）"
     v_url = _pick_url(video_stream)
