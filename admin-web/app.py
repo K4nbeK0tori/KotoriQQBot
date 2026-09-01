@@ -84,9 +84,6 @@ def require_auth(f):
     return wrapper
 
 
-_ensure_web_auth()
-
-
 @app.before_request
 def _auth_check():
     """统一 API 登录检查（login/logout 除外）。"""
@@ -774,5 +771,6 @@ def api_poll():
 
 
 if __name__ == "__main__":
+    _ensure_web_auth()
     os.makedirs(ROLE_DIR, exist_ok=True)
     app.run(host="0.0.0.0", port=8133)
