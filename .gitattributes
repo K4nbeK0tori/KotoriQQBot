@@ -1,0 +1,6 @@
+# 行尾统一：shell 脚本强制 LF（服务器上执行必需）
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
