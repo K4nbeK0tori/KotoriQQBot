@@ -24,10 +24,9 @@ BILI_LINK_RE = re.compile(
 )
 
 API_VIEW = "https://api.bilibili.com/x/web-interface/view"
-UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
-)
+# 注意：B站风控会对"数据中心 IP + 浏览器 UA 但无 cookie"的请求返回 412，
+# 实测 curl 风格 UA 可直接放行（2026-09 验证），故此处用 curl UA。
+UA = "curl/8.5.0"
 
 
 def extract_bvid(
