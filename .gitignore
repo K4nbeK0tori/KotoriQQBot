@@ -7,6 +7,9 @@ napcat/qq/*
 !napcat/config/.gitkeep
 !napcat/qq/.gitkeep
 
+# ===== 共享下载目录（视频临时文件）=====
+downloads/*
+
 # ===== Python =====
 __pycache__/
 *.pyc

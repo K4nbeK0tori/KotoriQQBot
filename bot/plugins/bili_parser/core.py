@@ -11,10 +11,11 @@
 import asyncio
 import base64
 import json
+import os
 import re
 import urllib.parse
 import urllib.request
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 BVID_RE = re.compile(r"(BV[0-9A-Za-z]{10})")
 B23_RE = re.compile(r"https?://b23\.tv/[0-9A-Za-z]+", re.IGNORECASE)
@@ -121,6 +122,64 @@ async def download_image_base64(url: str, timeout: float = 10.0) -> Optional[str
         return "base64://" + base64.b64encode(data).decode("ascii")
     except Exception:
         return None
+
+
+DOWNLOAD_DIR = "/downloads"
+DOWNLOAD_TIMEOUT = 600  # 单个视频下载/合并超时（秒）
+
+
+async def download_video(
+    bvid: str,
+    title: str,
+    out_dir: str = DOWNLOAD_DIR,
+    timeout: int = DOWNLOAD_TIMEOUT,
+) -> Tuple[Optional[str], str]:
+    """用 yt-dlp 下载 B站视频为 mp4（限制 480p，控制体积与耗时）。
+
+    返回 (mp4路径, 错误信息)：成功时错误信息为空字符串。
+    """
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except OSError as e:
+        return None, f"无法创建下载目录 {out_dir}: {e!r}"
+
+    safe = re.sub(r'[\\/:*?"<>|\s]+', "_", title).strip("_")[:40] or bvid
+    base = f"{bvid}_{safe}"
+    url = f"https://www.bilibili.com/video/{bvid}"
+    cmd = [
+        "yt-dlp",
+        "-f", "bv*[height<=480]+ba/b[height<=480]",
+        "--merge-output-format", "mp4",
+        "--no-playlist",
+        "--no-progress",
+        "--user-agent", UA,
+        "-o", os.path.join(out_dir, f"{base}.%(ext)s"),
+        url,
+    ]
+    proc = None
+    try:
+        proc = await asyncio.wait_for(
+            asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            ),
+            timeout=timeout,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            msg = stderr.decode("utf-8", "replace")[-500:]
+            return None, f"yt-dlp 退出码 {proc.returncode}: {msg}"
+        for f in os.listdir(out_dir):
+            if f.startswith(base) and f.endswith(".mp4"):
+                return os.path.join(out_dir, f), ""
+        return None, "下载流程结束但未找到 mp4 文件"
+    except asyncio.TimeoutError:
+        if proc:
+            proc.kill()
+        return None, f"下载超时（>{timeout}s），已中止"
+    except Exception as e:
+        return None, f"下载异常: {e!r}"
 
 
 def format_duration(seconds: int) -> str:
