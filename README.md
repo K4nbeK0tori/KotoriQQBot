@@ -1,7 +1,8 @@
-# QQ 机器人：B站视频解析（NapCat + NoneBot2）
+# QQ 机器人：B站视频下载（NapCat + NoneBot2 + bili-api）
 
 在 1C1G 低配服务器（Debian 13）上运行，监听群消息中的哔哩哔哩视频链接，
-自动解析标题 / UP主 / 播放量 / 封面并回复到群里。
+**自动下载视频并直接发送视频消息到群里**（发送后删除服务器本地文件）；
+下载失败时降级发送视频信息（标题 / UP主 / 播放量 / 封面 + 链接）。
 
 > 与服务器上的 xray(VPN) 服务共存：所有端口一律绑定 `127.0.0.1`，
 > **不占用任何公网端口**，与 xray 的 443/80 零冲突。
@@ -11,31 +12,43 @@
 ```
 公网：仅 xray :443（VPN 独占）
 │
-└── 本机 127.0.0.1 ────────────────────────────
+└── 本机 127.0.0.1 ─────────────────────────────────
     NapCat（协议端）
-    ├─ OneBot11 WS   127.0.0.1:3001  ←── bot 容器内网直连 napcat:3001
+    ├─ OneBot11 WS   127.0.0.1:3001  ←── bot 内网直连 napcat:3001
     └─ WebUI         127.0.0.1:6099  ←── ssh 隧道访问，登录/管理
-                                            │
-    NoneBot2 + bili_parser（逻辑端）─────────┤
-        └── 出站调用 B站公开 API（无需入站端口）
+                                                 │
+    NoneBot2 + bili_parser（逻辑端）─────────────┤
+        ├─ 出站调 view API 拿视频信息
+        └─ 调 bili-api（内网 bili-api:8000，无端口映射）下载
+                                               │
+    bili-api（第三方下载服务，抓页面 __playinfo__）
+        └─ 出站访问 B站（带登录 cookie，绕开风控）
 ```
 
 - **napcat**：`mlikiowa/napcat-docker`，登录 QQ、收发消息，暴露 OneBot 11 协议
-- **bot**：NoneBot2 + 自写 `bili_parser` 插件，解析 B站链接并回复
-- 端口 3001/6099 只监听回环地址，公网不可达；`bot` 容器零端口映射
+- **bot**：NoneBot2 + 自写 `bili_parser` 插件，负责提取链接、调度下载、发送视频
+- **bili-api**：[Suxiaoqinx/bilibili](https://github.com/Suxiaoqinx/bilibili) 下载服务，
+  抓取视频页内嵌 `__playinfo__` 获取流地址，后台下载 + ffmpeg 合并
+- 三个容器共享 `./downloads` 目录（bot 写 → NapCat 读取发送 → 发送后删除）
+- 端口 3001/6099 只监听回环地址，公网不可达；`bot` / `bili-api` 零端口映射
 
 ## 目录结构
 
 ```
-├── docker-compose.yml     # NapCat + bot 编排（全绑 127.0.0.1）
+├── docker-compose.yml     # 三服务编排：napcat / bot / bili-api（全绑 127.0.0.1）
 ├── .env.example           # 配置模板（复制为 .env，不提交 git）
 ├── deploy.sh              # 服务器一键部署脚本
 ├── napcat/                # NapCat 挂载目录（config/qq，运行时数据，不提交 git）
+├── bili-api/              # 下载服务（Dockerfile 构建时拉第三方代码）
+│   ├── Dockerfile
+│   └── login_bili.py      # B站扫码登录脚本（生成 cookies.txt）
 └── bot/
     ├── Dockerfile
     ├── requirements.txt
     ├── bot.py             # NoneBot2 入口
-    └── plugins/bili_parser/__init__.py   # B站解析插件
+    └── plugins/bili_parser/
+        ├── __init__.py    # 插件：提取→下载→发视频→删除
+        └── core.py        # 核心逻辑（调 view API + bili-api）
 ```
 
 ## 第一步：推到 GitHub 备份
@@ -105,33 +118,51 @@ NapCat WebUI →「网络配置」→ 新建正向 WebSocket：
 - 若设置 token，同步填到服务器 `/opt/qqbot/.env` 的 `NAPCAT_WS_TOKEN`，然后
   `docker compose up -d` 重启生效
 
-### 5. 验证
+### 5. B站登录 cookie（一次性，下载高清必需）
+
+bili-api 抓取 B站页面需要登录 cookie，否则会被 412 风控拦截：
 
 ```bash
-docker compose ps                 # 两个容器都 Up
+docker exec -it qqbot-bili-api python /app/login_bili.py
+```
+
+1. 复制脚本打印的 URL 到 <https://cli.im> 生成二维码
+2. 手机 B站 APP 扫码确认
+3. 等脚本自动轮询完成（看到 `登录成功! cookies 已写入` 再操作）
+
+cookie 保存在 `./bili-api/cookies.txt`（挂载卷，重建容器不丢）。
+
+### 6. 验证
+
+```bash
+docker compose ps                 # 三个容器都 Up
 docker compose logs -f bot        # 看到连接成功的日志
 ```
 
-在群里发一个 B站链接 / b23.tv 短链，机器人应回复视频信息 + 封面。
-同一会话 30 秒内只解析一次（防刷）。
+在群里发一个 B站链接 / b23.tv 短链，机器人会**下载视频并直接发视频消息**到群里，
+发送后自动删除服务器本地文件。同一会话 120 秒内只处理一次（防刷）。
 
 ## 日常运维
 
 ```bash
-docker compose logs -f napcat   # NapCat 日志（登录/风控提示）
-docker compose logs -f bot      # 机器人日志
-docker compose restart bot      # 改插件代码后重启（需 docker compose build 重新构建）
-git pull                        # 拉取本仓库更新
-bash deploy.sh                  # 重新部署
+docker compose logs -f napcat     # NapCat 日志（登录/风控提示）
+docker compose logs -f bot        # 机器人日志（下载/发送流程）
+docker compose logs -f bili-api   # 下载服务日志
+docker compose restart bot        # 改插件代码后重启（需 docker compose build 重新构建）
+git pull                          # 拉取本仓库更新
+bash deploy.sh                    # 重新部署
 ```
 
 ## 常见问题
 
+- **下载失败 / 回到解析信息**：多半是 B站 cookie 过期（bili-api 被 412 拦截），
+  重跑登录：`docker exec -it qqbot-bili-api python /app/login_bili.py`
 - **登录提示风控 / 设备锁**：用 QQ 小号，先在手机 QQ 上登录该号几天养号，
   再扫码登录 NapCat；登录态保存在 `napcat/qq` 目录（已 gitignore）
 - **封号风险**：非官方协议有封号可能，务必使用小号，机器人行为低调
 - **镜像拉不下来**：配置 Docker registry 镜像加速（见上）
 - **WebUI 打不开**：确认 ssh 隧道已建立、`.env` 中 token 与 WebUI 输入一致
+- **视频消息太大发不出去**：自动降级发群文件（`_send_video` 已处理）
 
 ## 端口清单
 
@@ -140,3 +171,4 @@ bash deploy.sh                  # 重新部署
 | 6099 | NapCat WebUI（登录/管理） | 127.0.0.1（ssh 隧道访问） |
 | 3001 | OneBot 11 正向 WS | 127.0.0.1（bot 内网直连） |
 | —    | bot 容器 | 无任何端口映射 |
+| —    | bili-api 容器 | 无任何端口映射（内网 bili-api:8000） |

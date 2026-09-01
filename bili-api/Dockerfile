@@ -18,6 +18,9 @@ RUN git clone --depth 1 https://github.com/Suxiaoqinx/bilibili.git /app \
 
 RUN pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
+# 登录脚本（扫码生成 cookies.txt，详见 login_bili.py 顶部说明）
+COPY login_bili.py /app/login_bili.py
+
 # 可选：挂载 cookies.txt 提升下载稳定性/清晰度（用其 bililogin.py 扫码生成）
 # 见 docker-compose.yml 中 bili-api 的 volumes 注释
 
