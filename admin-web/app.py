@@ -238,7 +238,7 @@ ADMIN_HTML = """<!doctype html>
 <div class="card">
   <h3 style="margin-top:0;">群开关</h3>
   <table>
-    <tr><th>群号</th><th>AI</th><th>角色</th></tr>
+    <tr><th>群号</th><th>AI</th></tr>
     <tbody id="group-tbody"></tbody>
   </table>
   <div style="margin-top:10px;">
@@ -387,16 +387,13 @@ async function setDefault(name) {
 }
 
 async function loadGroups() {
-  const [groups, roles] = await Promise.all([api("/api/groups"), api("/api/roles")]);
+  const groups = await api("/api/groups");
   const tbody = $("group-tbody");
   tbody.innerHTML = "";
   for (const [gid, g] of Object.entries(groups)) {
     const tr = document.createElement("tr");
-    const opts = roles.map(r =>
-      `<option value="${r.name}" ${r.name === g.role ? "selected" : ""}>${r.name}</option>`).join("");
     tr.innerHTML = `<td>${gid}</td>
-      <td><input type="checkbox" ${g.enabled ? "checked" : ""} onchange="setGroup('${gid}', this.checked)"></td>
-      <td><select onchange="setGroupRole('${gid}', this.value)">${opts}</select></td>`;
+      <td><input type="checkbox" ${g.enabled ? "checked" : ""} onchange="setGroup('${gid}', this.checked)"></td>`;
     tbody.appendChild(tr);
   }
 }
@@ -413,10 +410,6 @@ async function addGroup() {
 
 async function setGroup(gid, enabled) {
   await api("/api/groups/" + gid, "POST", { enabled });
-}
-
-async function setGroupRole(gid, role) {
-  await api("/api/groups/" + gid, "POST", { role });
 }
 
 async function loadAdmins() {

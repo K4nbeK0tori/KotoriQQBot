@@ -165,14 +165,21 @@ async def _chat(system: str, history: List[dict]) -> tuple:
 
 
 async def _do_chat(
-    bot: Bot, event: MessageEvent, content: str, gid: str, role_override: Optional[str] = None
+    bot: Bot,
+    event: MessageEvent,
+    content: str,
+    gid: str,
+    role_override: Optional[str] = None,
+    uid: str = "",
 ):
     # 只用角色卡（无内置提示词）；没配角色卡时 system 为空
     name = role_override or _group_role(gid)
     role = _load_role(name)
     system = (role or {}).get("system", "")
 
-    history = _contexts.setdefault(gid, [])
+    # 上下文按 群+用户 隔离，避免不同人设之间串扰
+    key = f"{gid}:{uid}" if uid else gid
+    history = _contexts.setdefault(key, [])
     history.append({"role": "user", "content": content})
     history = history[-MAX_HISTORY:]
 
@@ -180,7 +187,7 @@ async def _do_chat(
     if reply:
         _record_usage(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
         history.append({"role": "assistant", "content": reply})
-        _contexts[gid] = history[-MAX_HISTORY:]
+        _contexts[key] = history[-MAX_HISTORY:]
         try:
             await bot.send(event, MessageSegment.text(reply))
         except Exception as e:
@@ -232,7 +239,9 @@ async def _chat_cmd(bot: Bot, event: MessageEvent):
     if now - _last_chat.get(gid, 0) < CHAT_COOLDOWN:
         return
     _last_chat[gid] = now
-    await _do_chat(bot, event, content[:MAX_CONTENT], gid)
+    await _do_chat(
+        bot, event, content[:MAX_CONTENT], gid, None, str(event.user_id)
+    )
 
 
 ai_cmd = on_command("ai", priority=5, block=True)
@@ -369,7 +378,9 @@ async def _msg_chat(bot: Bot, event: MessageEvent):
     role_override = None
     if at_me and _is_superadmin(event.user_id):
         role_override = _admin_role_name()
-    await _do_chat(bot, event, content[:MAX_CONTENT], gid, role_override)
+    await _do_chat(
+        bot, event, content[:MAX_CONTENT], gid, role_override, str(event.user_id)
+    )
 
 
 # ===== 初始化：SUPERADMINS 环境变量作为初始超级管理员种子 =====
