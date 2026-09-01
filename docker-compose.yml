@@ -32,6 +32,22 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # ---- B站下载 API 服务（抓页面 __playinfo__ 绕开 playurl 风控）----
+  bili-api:
+    build: ./bili-api
+    container_name: qqbot-bili-api
+    restart: unless-stopped
+    volumes:
+      - ./downloads:/app/downloads   # 下载目录（与 napcat/bot 共享）
+      # 可选：挂载 cookies.txt 提升稳定性/清晰度
+      # - ./bili-api/cookies.txt:/app/cookies.txt
+    # 不映射任何端口：仅 compose 内网访问 bili-api:8000
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # ---- 逻辑端：NoneBot2 + B站解析 ----
   bot:
     build: ./bot

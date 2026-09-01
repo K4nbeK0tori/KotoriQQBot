@@ -56,7 +56,10 @@ _FALLBACK_WBI_KEYS = (
 )
 
 DOWNLOAD_DIR = "/downloads"
-DOWNLOAD_TIMEOUT = 600  # 单个视频下载/合并总超时（秒）
+DOWNLOAD_TIMEOUT = 600  # 单个视频下载总超时（秒）
+
+# bili-api 服务地址（compose 内网服务名）
+BILI_API_URL = os.environ.get("BILI_API_URL", "http://bili-api:8000")
 
 # buvid cookie 缓存（TTL 1 小时，避免每次请求都打 spi）
 _cookie_cache: Dict[str, object] = {"cookie": None, "ts": 0.0}
@@ -98,6 +101,13 @@ def _http_get_json(url: str, headers: Optional[Dict] = None, timeout: float = 10
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def _http_get_text(url: str, timeout: float = 30.0) -> str:
+    """GET 并返回纯文本（bili-api 返回 text/plain）。"""
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", "replace")
 
 
 def _resolve_redirect(url: str) -> str:
@@ -276,70 +286,55 @@ async def _merge_mp4(video_path: str, audio_path: Optional[str], out_path: str) 
 async def download_video(
     bvid: str,
     title: str,
-    cid: int,
+    cid: Optional[int] = None,
     out_dir: str = DOWNLOAD_DIR,
     timeout: int = DOWNLOAD_TIMEOUT,
 ) -> Tuple[Optional[str], str]:
-    """下载 B站视频为 mp4（<=480p，音视频分离流 + ffmpeg 合并）。
+    """通过 bili-api 服务下载 B站视频为 mp4。
+
+    bili-api 抓取视频页 __playinfo__ 获取流地址（绕开 playurl API 风控），
+    后台任务下载 + ffmpeg 合并。文件落在共享 downloads 目录
+    （bili-api 的 /app/downloads == 本容器的 /downloads）。
 
     返回 (mp4路径, 错误信息)：成功时错误信息为空字符串。
     """
-    try:
-        os.makedirs(out_dir, exist_ok=True)
-    except OSError as e:
-        return None, f"无法创建下载目录 {out_dir}: {e!r}"
-
-    cookie = _get_buvid_cookie()
-    if not cookie:
-        return None, "获取 B站 cookie 失败"
-
-    if _in_playurl_cooldown():
-        return None, "playurl 处于冷却期（此前被风控），已降级"
-
-    # playurl 受时间窗口限流：view 后稍作缓冲再请求；
-    # 失败只重试一次，仍失败则进入冷却，避免反复撞风控
-    video_stream = audio_stream = None
-    referer = f"https://www.bilibili.com/video/{bvid}"
-    for attempt in range(2):
-        await asyncio.sleep(1.5 + attempt * 0.5)
-        dash_data = await fetch_playurl(bvid, cid, cookie, referer=referer)
-        if dash_data:
-            v, a = _pick_streams(dash_data)
-            if v:
-                video_stream, audio_stream = v, a
-                break
-        cookie = _get_buvid_cookie(force=True) or cookie
-        await asyncio.sleep(8 * (attempt + 1))
-    if not video_stream:
-        global _playurl_cooldown_until
-        _playurl_cooldown_until = time.time() + PLAYURL_COOLDOWN_SECONDS
-        return None, "playurl 被风控，已进入 10 分钟冷却"
-    v_url = _pick_url(video_stream)
-    a_url = _pick_url(audio_stream)
-    if not v_url:
-        return None, "视频流 URL 为空"
-
     safe = re.sub(r'[\\/:*?"<>|\s]+', "_", title).strip("_")[:40] or bvid
-    base = f"{bvid}_{safe}"
-    v_path = os.path.join(out_dir, f"{base}.video.m4s")
-    a_path = os.path.join(out_dir, f"{base}.audio.m4s") if a_url else None
+    filename = f"{bvid}_{safe}"
+    page_url = f"https://www.bilibili.com/video/{bvid}"
+    params = {"url": page_url, "merge": "true", "filename": filename}
+    api_url = f"{BILI_API_URL}/api/video/download?{urllib.parse.urlencode(params)}"
 
-    if not await _download_file(v_url, v_path, cookie):
-        return None, "视频流下载失败"
-    if a_url and not await _download_file(a_url, a_path, cookie):
-        return None, "音频流下载失败"
+    try:
+        resp_text = await asyncio.to_thread(_http_get_text, api_url)
+    except Exception as e:
+        return None, f"bili-api 请求失败: {e!r}"
 
-    mp4 = os.path.join(out_dir, f"{base}.mp4")
-    ok = await _merge_mp4(v_path, a_path, mp4)
-    for p in (v_path, a_path):
-        if p and os.path.exists(p):
-            try:
-                os.remove(p)
-            except OSError:
-                pass
-    if not ok:
-        return None, "ffmpeg 合并失败"
-    return mp4, ""
+    m = re.search(r"任务ID:\s*([0-9a-fA-F-]+)", resp_text)
+    if not m:
+        return None, f"未获取到任务ID: {resp_text[:200]}"
+    task_id = m.group(1)
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        await asyncio.sleep(5)
+        try:
+            st = await asyncio.to_thread(
+                _http_get_text, f"{BILI_API_URL}/api/download/status/{task_id}"
+            )
+        except Exception:
+            continue
+        upper = st.upper()
+        if "已完成" in st or "COMPLETED" in upper:
+            m2 = re.search(r"合并文件:\s*(\S+)", st) or re.search(
+                r"文件路径:\s*(\S+)", st
+            )
+            if m2:
+                path = os.path.basename(m2.group(1).strip())
+                return os.path.join(out_dir, path), ""
+            return None, "任务完成但未找到文件路径"
+        if "失败" in st or "FAILED" in upper:
+            return None, f"下载任务失败: {st[:300]}"
+    return None, f"下载超时（>{timeout}s）"
 
 
 async def download_image_base64(url: str, timeout: float = 10.0) -> Optional[str]:
