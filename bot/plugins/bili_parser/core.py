@@ -91,7 +91,12 @@ def extract_bvid(
             or BVID_RE.search(payload)
         )
         if m:
-            return m.group(1) if m.group(1).startswith("BV") else m.group(0)
+            # B23_RE 无捕获组，兼容处理：能取到 group(1) 才用，否则整体返回
+            try:
+                g1 = m.group(1)
+            except IndexError:
+                return m.group(0)
+            return g1 if g1.startswith("BV") else m.group(0)
     return None
 
 
