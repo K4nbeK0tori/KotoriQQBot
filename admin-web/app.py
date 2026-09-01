@@ -228,6 +228,10 @@ ADMIN_HTML = """<!doctype html>
   <div style="margin-top:10px;">
     <button onclick="newRole()">➕ 新建角色卡</button>
   </div>
+  <div style="margin-top:12px;">
+    <label>👑 超管专属角色卡（超管@时使用）：</label>
+    <select id="admin-role" onchange="setAdminRole(this.value)" style="max-width:200px;"></select>
+  </div>
   <div id="role-edit" class="role-edit"></div>
 </div>
 
@@ -306,6 +310,17 @@ async function loadRoles() {
       </td>`;
     tbody.appendChild(tr);
   }
+  // 超管专属角色卡下拉
+  const sel = $("admin-role");
+  sel.innerHTML = '<option value="">（无，跟随群角色）</option>' +
+    roles.map(r => `<option value="${r.name}" ${r.name === admin.admin_role ? "selected" : ""}>${r.name}</option>`).join("");
+}
+
+async function setAdminRole(name) {
+  try {
+    await api("/api/admin_role", "POST", { name });
+    show(name ? "超管专属角色卡已设为「" + name + "」" : "已取消超管专属角色卡", true);
+  } catch (e) { show(e.message, false); }
 }
 
 async function editRole(name) {
@@ -632,7 +647,24 @@ def bili_page():
 @app.get("/api/config")
 def api_config():
     a = _admin()
-    return jsonify({"default_role": a.get("default_role", "viola")})
+    return jsonify(
+        {
+            "default_role": a.get("default_role", "viola"),
+            "admin_role": a.get("admin_role") or "",
+        }
+    )
+
+
+@app.post("/api/admin_role")
+def api_admin_role():
+    body = request.get_json(silent=True) or {}
+    name = str(body.get("name", "")).strip()
+    a = _admin()
+    if name and not os.path.exists(_role_path(name)):
+        return jsonify(error="角色卡不存在"), 400
+    a["admin_role"] = name or None
+    _write_json(ADMIN_DATA, a)
+    return jsonify(ok=True)
 
 
 @app.get("/api/roles")

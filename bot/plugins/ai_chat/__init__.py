@@ -120,6 +120,15 @@ def _is_superadmin(qq) -> bool:
     return str(qq) in {str(x) for x in data.get("superadmins", [])}
 
 
+def _admin_role_name() -> Optional[str]:
+    """超级管理员专属角色卡名（面板配置），未设置返回 None。"""
+    data = _load_admin_data()
+    name = data.get("admin_role")
+    if name and _load_role(name):
+        return name
+    return None
+
+
 # ===== DeepSeek =====
 
 
@@ -155,9 +164,12 @@ async def _chat(system: str, history: List[dict]) -> tuple:
         return None, {}
 
 
-async def _do_chat(bot: Bot, event: MessageEvent, content: str, gid: str):
+async def _do_chat(
+    bot: Bot, event: MessageEvent, content: str, gid: str, role_override: Optional[str] = None
+):
     # 只用角色卡（无内置提示词）；没配角色卡时 system 为空
-    role = _load_role(_group_role(gid))
+    name = role_override or _group_role(gid)
+    role = _load_role(name)
     system = (role or {}).get("system", "")
 
     history = _contexts.setdefault(gid, [])
@@ -350,7 +362,12 @@ async def _msg_chat(bot: Bot, event: MessageEvent):
     if now - _last_chat.get(gid, 0) < CHAT_COOLDOWN:
         return
     _last_chat[gid] = now
-    await _do_chat(bot, event, content[:MAX_CONTENT], gid)
+
+    # 超管 @ 时使用超管专属角色卡（面板配置）
+    role_override = None
+    if at_me and _is_superadmin(event.user_id):
+        role_override = _admin_role_name()
+    await _do_chat(bot, event, content[:MAX_CONTENT], gid, role_override)
 
 
 # ===== 初始化：SUPERADMINS 环境变量作为初始超级管理员种子 =====
