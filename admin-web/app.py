@@ -269,6 +269,14 @@ ADMIN_HTML = """<!doctype html>
 </div>
 
 <div class="card">
+  <h3 style="margin-top:0;">🔍 联网搜索</h3>
+  <label>
+    <input type="checkbox" id="web-search" onchange="setWebSearch(this.checked)">
+    开启联网搜索增强（每次对话前用 Bing 搜索实时信息，DeepSeek 据此回答）
+  </label>
+</div>
+
+<div class="card">
   <h3 style="margin-top:0;">📊 Token 用量（近 14 天）</h3>
   <div id="usage-chart" style="display:flex;align-items:flex-end;gap:6px;height:140px;padding:10px 0;"></div>
   <div id="usage-total" style="font-size:13px;color:#8a5a70;margin-top:6px;"></div>
@@ -450,6 +458,20 @@ async function testApi() {
   } catch (e) { el.textContent = "❌ " + e.message; }
 }
 
+async function loadWebSearch() {
+  try {
+    const c = await api("/api/config");
+    $("web-search").checked = !!c.web_search;
+  } catch (e) {}
+}
+
+async function setWebSearch(v) {
+  try {
+    await api("/api/web_search", "POST", { enabled: v });
+    show(v ? "🔍 联网模式已开启" : "联网模式已关闭", true);
+  } catch (e) { show(e.message, false); }
+}
+
 async function loadUsage() {
   try {
     const d = await api("/api/usage");
@@ -477,6 +499,7 @@ loadRoles();
 loadGroups();
 loadAdmins();
 loadUsage();
+loadWebSearch();
 </script>
 <script src="/static/sakura.js"></script>
 </body>
@@ -644,8 +667,18 @@ def api_config():
         {
             "default_role": a.get("default_role", "viola"),
             "admin_role": a.get("admin_role") or "",
+            "web_search": bool(a.get("web_search", False)),
         }
     )
+
+
+@app.post("/api/web_search")
+def api_web_search():
+    body = request.get_json(silent=True) or {}
+    a = _admin()
+    a["web_search"] = bool(body.get("enabled", False))
+    _write_json(ADMIN_DATA, a)
+    return jsonify(ok=True)
 
 
 @app.post("/api/admin_role")

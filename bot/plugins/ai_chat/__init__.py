@@ -17,6 +17,7 @@ import json
 import os
 import re
 import time
+import urllib.parse
 import urllib.request
 from typing import Dict, List, Optional
 
@@ -129,6 +130,35 @@ def _admin_role_name() -> Optional[str]:
     return None
 
 
+def _web_search_enabled() -> bool:
+    """联网搜索增强开关（面板配置）。"""
+    data = _load_admin_data()
+    return bool(data.get("web_search", False))
+
+
+def _search_web(query: str, top: int = 5) -> List[str]:
+    """用 Bing RSS 搜索实时信息，返回标题/摘要/链接列表。"""
+    try:
+        url = "https://www.bing.com/search?q=" + urllib.parse.quote(query) + "&format=rss"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0"})
+        xml = urllib.request.urlopen(req, timeout=12).read().decode("utf-8", "replace")
+        items = re.findall(
+            r"<item>.*?<title>(.*?)</title>.*?<link>(.*?)</link>.*?<description>(.*?)</description>",
+            xml,
+            re.DOTALL,
+        )
+        results = []
+        for t, l, d in items[:top]:
+            t = re.sub(r"<[^>]+>", "", t).strip()
+            d = re.sub(r"<[^>]+>", "", d).strip()
+            if t:
+                results.append(f"{t}：{d[:150]}（{l}）")
+        return results
+    except Exception as e:
+        logger.warning(f"[ai] 联网搜索失败: {e!r}")
+        return []
+
+
 # ===== DeepSeek =====
 
 
@@ -176,6 +206,13 @@ async def _do_chat(
     name = role_override or _group_role(gid)
     role = _load_role(name)
     system = (role or {}).get("system", "")
+
+    # 联网搜索增强：开启时先搜索，把实时结果注入 system
+    if _web_search_enabled():
+        results = await asyncio.to_thread(_search_web, content)
+        if results:
+            note = "\n\n[以下为联网搜索到的实时信息，可据此回答；若与问题无关就忽略]\n" + "\n".join(results)
+            system = (system + note) if system else note
 
     # 上下文按 群+用户 隔离，避免不同人设之间串扰
     key = f"{gid}:{uid}" if uid else gid
