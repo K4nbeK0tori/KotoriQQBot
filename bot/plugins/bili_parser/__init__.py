@@ -189,18 +189,14 @@ async def handle(bot: Bot, event: MessageEvent):
     except Exception as e:
         logger.warning(f"[bili] 下载提示发送失败: {e!r}")
 
-    # 主流程：下载视频 → 发解析信息 + 发视频 → 删除
+    # 主流程：下载视频 → 合并转发 → 删除
     async with _download_lock:
         logger.info(f"[bili] 开始下载: {bvid}")
         mp4, err = await download_video(bvid, title, cid)
         if mp4:
             logger.info(f"[bili] 下载完成: {mp4}")
-            # 优先：信息卡+封面+视频 合并转发为一条聊天记录
+            # 只发合并转发（聊天记录）；失败不降级，直接发失败提示
             sent = await _send_forward(bot, event, session, text, info, mp4)
-            if not sent:
-                # 降级：分开发信息卡和视频
-                await _send_info(bot, event, text, info, bvid, session)
-                sent = await _send_video(bot, event, session, mp4)
             try:
                 os.remove(mp4)
                 logger.info(f"[bili] 已删除临时文件: {os.path.basename(mp4)}")
@@ -208,12 +204,12 @@ async def handle(bot: Bot, event: MessageEvent):
                 pass
             if sent:
                 await _recall(bot, tip_msg_id)  # 视频发出，撤回剪辑提示
+                logger.info(f"[bili] 视频已发送: {bvid} -> {session}")
             else:
                 await _send_fail(bot, event, bvid, session)
-            logger.info(f"[bili] 视频已发送({sent}): {bvid} -> {session}")
+                logger.warning(f"[bili] 合并转发失败，已发失败提示: {bvid}")
             return
         logger.warning(f"[bili] 下载失败: {bvid} ({err})")
 
-    # 下载失败：失败消息 + 信息卡片
+    # 下载失败：失败消息
     await _send_fail(bot, event, bvid, session)
-    await _send_info(bot, event, text, info, bvid, session)
