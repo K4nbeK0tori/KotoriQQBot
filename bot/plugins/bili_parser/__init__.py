@@ -65,7 +65,7 @@ async def _recall(bot: Bot, msg_id) -> bool:
     if not msg_id:
         return False
     try:
-        await bot.call_api("delete_msg", message_id=msg_id)
+        await bot.call_api("delete_msg", message_id=int(msg_id))
         logger.info("[bili] 已撤回剪辑提示")
         return True
     except Exception as e:
