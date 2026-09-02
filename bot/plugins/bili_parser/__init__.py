@@ -173,6 +173,15 @@ async def handle(bot: Bot, event: MessageEvent):
         logger.warning(f"[bili] B站API查询失败: {bvid}")
         return
     logger.info(f"[bili] API成功: {bvid} title={info.get('title', '')[:24]}")
+
+    # 视频时长限制：超过 15 分钟不下载，直接失败提示
+    MAX_DURATION_SECONDS = 15 * 60
+    duration = info.get("duration", 0)
+    if duration > MAX_DURATION_SECONDS:
+        logger.info(f"[bili] 视频超长跳过: {bvid} duration={duration}s")
+        await _send_fail(bot, event, bvid, session)
+        return
+
     _last_handle[session] = now
 
     title = info.get("title", bvid)

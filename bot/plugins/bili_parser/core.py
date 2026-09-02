@@ -56,7 +56,7 @@ _FALLBACK_WBI_KEYS = (
 )
 
 DOWNLOAD_DIR = "/downloads"
-DOWNLOAD_TIMEOUT = 600  # 单个视频下载总超时（秒）
+DOWNLOAD_TIMEOUT = 60  # 单个视频下载总超时（秒），超过即放弃
 
 # bili-api 服务地址（compose 内网服务名）
 BILI_API_URL = os.environ.get("BILI_API_URL", "http://bili-api:8000")
