@@ -162,21 +162,6 @@ def _search_web(query: str, top: int = 5) -> List[str]:
 
 # ===== DeepSeek =====
 
-# 联网工具声明（function calling，模型自主决定何时搜索）
-WEB_SEARCH_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "web_search",
-        "description": "搜索互联网获取实时信息（新闻、天气、股价、最新事件、日期等）。当用户问题涉及实时/最新/今日信息且你不确定时调用。",
-        "parameters": {
-            "type": "object",
-            "properties": {"query": {"type": "string", "description": "搜索关键词"}},
-            "required": ["query"],
-        },
-    },
-}
-TOOLS = [WEB_SEARCH_TOOL]
-
 
 async def _chat(system: str, history: List[dict]) -> tuple:
     """调用 DeepSeek，返回 (回复内容, usage 字典)。失败返回 (None, {})。"""
