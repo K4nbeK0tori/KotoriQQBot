@@ -210,9 +210,12 @@ async def _do_chat(
     # 联网搜索增强：开启时先搜索，把实时结果注入 system
     if _web_search_enabled():
         results = await asyncio.to_thread(_search_web, content)
+        logger.info(f"[ai] 联网搜索结果 {len(results)} 条")
         if results:
             note = "\n\n[以下为联网搜索到的实时信息，可据此回答；若与问题无关就忽略]\n" + "\n".join(results)
             system = (system + note) if system else note
+
+    logger.info(f"[ai] 调用 DeepSeek: system_len={len(system)} history={len(history)} key={bool(DEEPSEEK_API_KEY)}")
 
     # 上下文按 群+用户 隔离，避免不同人设之间串扰
     key = f"{gid}:{uid}" if uid else gid
