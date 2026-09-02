@@ -207,6 +207,11 @@ async def _do_chat(
     role = _load_role(name)
     system = (role or {}).get("system", "")
 
+    # 注入当前真实时间（DeepSeek 知识截止较早，避免日期/时间问题胡答）
+    now_str = time.strftime("%Y年%m月%d日 %H:%M")
+    time_note = f"当前真实时间是：{now_str}（回答日期、时间、今天之类的问题时以这个为准，不要使用你的知识截止日期）"
+    system = (time_note + "\n\n" + system) if system else time_note
+
     # 联网搜索增强：开启时先搜索，把实时结果注入 system
     if _web_search_enabled():
         results = await asyncio.to_thread(_search_web, content)
