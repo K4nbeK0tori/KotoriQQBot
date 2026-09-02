@@ -45,6 +45,19 @@ def _collect_json_payloads(event: MessageEvent):
 
 
 FAIL_MSG = "哎呀，老师的视频剪辑失败了呢，需要我给你讲个小故事吗，比如“人类与火的故事？”"
+TOO_BIG_MSG = "视频太大了，小薇剪不动了...."
+MAX_FILE_BYTES = 50 * 1024 * 1024  # 单个视频超过 50MB 视为太大
+
+
+async def _send_text(bot: Bot, event: MessageEvent, text: str, bvid: str, session) -> bool:
+    """发送一条自定义文本消息。"""
+    try:
+        await bot.send(event, MessageSegment.text(text))
+        logger.info(f"[bili] 提示已发送: {bvid} -> {session} | {text[:20]}")
+        return True
+    except Exception as e:
+        logger.warning(f"[bili] 提示发送失败: {bvid} -> {e!r}")
+        return False
 
 
 async def _recall(bot: Bot, msg_id) -> bool:
@@ -174,12 +187,12 @@ async def handle(bot: Bot, event: MessageEvent):
         return
     logger.info(f"[bili] API成功: {bvid} title={info.get('title', '')[:24]}")
 
-    # 视频时长限制：超过 15 分钟不下载，直接失败提示
+    # 视频时长限制：超过 15 分钟不下载，发"太大"提示
     MAX_DURATION_SECONDS = 15 * 60
     duration = info.get("duration", 0)
     if duration > MAX_DURATION_SECONDS:
         logger.info(f"[bili] 视频超长跳过: {bvid} duration={duration}s")
-        await _send_fail(bot, event, bvid, session)
+        await _send_text(bot, event, TOO_BIG_MSG, bvid, session)
         return
 
     _last_handle[session] = now
@@ -204,6 +217,19 @@ async def handle(bot: Bot, event: MessageEvent):
         mp4, err = await download_video(bvid, title, cid)
         if mp4:
             logger.info(f"[bili] 下载完成: {mp4}")
+            # 文件过大检查：超过 50MB 不发，发"太大"提示
+            try:
+                size = os.path.getsize(mp4)
+            except OSError:
+                size = 0
+            if size > MAX_FILE_BYTES:
+                logger.info(f"[bili] 文件太大: {size / 1024 / 1024:.1f}MB")
+                try:
+                    os.remove(mp4)
+                except OSError:
+                    pass
+                await _send_text(bot, event, TOO_BIG_MSG, bvid, session)
+                return
             # 只发合并转发（聊天记录）；失败不降级，直接发失败提示
             sent = await _send_forward(bot, event, session, text, info, mp4)
             try:
@@ -220,5 +246,8 @@ async def handle(bot: Bot, event: MessageEvent):
             return
         logger.warning(f"[bili] 下载失败: {bvid} ({err})")
 
-    # 下载失败：失败消息
-    await _send_fail(bot, event, bvid, session)
+    # 下载失败：超时/超长 → "太大"提示；其他错误 → 失败提示
+    if err and "超时" in err:
+        await _send_text(bot, event, TOO_BIG_MSG, bvid, session)
+    else:
+        await _send_fail(bot, event, bvid, session)
