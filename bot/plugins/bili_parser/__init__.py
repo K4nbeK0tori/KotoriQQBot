@@ -46,7 +46,7 @@ def _collect_json_payloads(event: MessageEvent):
 
 FAIL_MSG = "哎呀，老师的视频剪辑失败了呢，需要我给你讲个小故事吗，比如“人类与火的故事？”"
 TOO_BIG_MSG = "视频太大了，小薇剪不动了...."
-MAX_FILE_BYTES = 50 * 1024 * 1024  # 单个视频超过 50MB 视为太大
+MAX_FILE_BYTES = 500 * 1024 * 1024  # 单个视频超过 500MB 视为太大
 
 
 async def _send_text(bot: Bot, event: MessageEvent, text: str, bvid: str, session) -> bool:
@@ -187,8 +187,8 @@ async def handle(bot: Bot, event: MessageEvent):
         return
     logger.info(f"[bili] API成功: {bvid} title={info.get('title', '')[:24]}")
 
-    # 视频时长限制：超过 15 分钟不下载，发"太大"提示
-    MAX_DURATION_SECONDS = 15 * 60
+    # 视频时长限制：超过 20 分钟不下载，发"太大"提示
+    MAX_DURATION_SECONDS = 20 * 60
     duration = info.get("duration", 0)
     if duration > MAX_DURATION_SECONDS:
         logger.info(f"[bili] 视频超长跳过: {bvid} duration={duration}s")
