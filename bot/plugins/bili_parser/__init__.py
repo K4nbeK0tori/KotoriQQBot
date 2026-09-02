@@ -74,30 +74,34 @@ async def _send_fail(bot: Bot, event: MessageEvent, bvid: str, session) -> bool:
 async def _send_forward(
     bot: Bot, event: MessageEvent, session, text: str, info, mp4_path: str
 ) -> bool:
-    """把信息卡 + 封面 + 视频整合为一条合并转发（聊天记录）发送。返回是否成功。"""
+    """把信息卡 + 视频整合为一条合并转发（聊天记录）发送。返回是否成功。
+
+    节点只用文字 + 视频（封面图节点易导致合并转发失败，已移除）；
+    失败自动重试一次。
+    """
+    my_id = str(bot.self_id)
     nodes = [
-        MessageSegment.node_custom(0, "薇欧拉", MessageSegment.text(text)),
+        MessageSegment.node_custom(my_id, "薇欧拉", MessageSegment.text(text)),
+        MessageSegment.node_custom(my_id, "薇欧拉", MessageSegment.video(file=mp4_path)),
     ]
-    pic = info.get("pic", "")
-    if pic:
-        img = await download_image_base64(pic)
-        if img:
-            nodes.append(MessageSegment.node_custom(0, "薇欧拉", MessageSegment.image(img)))
-    nodes.append(MessageSegment.node_custom(0, "薇欧拉", MessageSegment.video(file=mp4_path)))
-    try:
-        if hasattr(event, "group_id"):
-            await bot.call_api(
-                "send_group_forward_msg", group_id=session, messages=nodes
+    for attempt in range(2):
+        try:
+            if hasattr(event, "group_id"):
+                await bot.call_api(
+                    "send_group_forward_msg", group_id=session, messages=nodes
+                )
+            else:
+                await bot.call_api(
+                    "send_private_forward_msg", user_id=session, messages=nodes
+                )
+            logger.info(
+                f"[bili] 合并转发已发送: {os.path.basename(mp4_path)} -> {session}"
             )
-        else:
-            await bot.call_api(
-                "send_private_forward_msg", user_id=session, messages=nodes
-            )
-        logger.info(f"[bili] 合并转发已发送: {os.path.basename(mp4_path)} -> {session}")
-        return True
-    except Exception as e:
-        logger.warning(f"[bili] 合并转发失败: {e!r}")
-        return False
+            return True
+        except Exception as e:
+            logger.warning(f"[bili] 合并转发失败({attempt + 1}/2): {e!r}")
+            await asyncio.sleep(1.5)
+    return False
 
 
 async def _send_info(
