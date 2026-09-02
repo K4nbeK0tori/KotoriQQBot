@@ -397,13 +397,12 @@ async def _msg_chat(bot: Bot, event: MessageEvent):
     if not content:
         return
 
-    # 群开关
+    # 群开关（未开启时提示，方便排查）
     if not _group_enabled(gid):
-        if at_me:
-            try:
-                await bot.send(event, "本群AI还没开启喵，让管理员发 /ai on 开启一下哦")
-            except Exception:
-                pass
+        try:
+            await bot.send(event, "本群AI还没开启喵，让管理员发 /ai on 开启一下哦")
+        except Exception:
+            pass
         return
 
     now = time.time()
