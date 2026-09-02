@@ -399,6 +399,7 @@ async def _msg_chat(bot: Bot, event: MessageEvent):
 
     # 群开关（未开启时提示，方便排查）
     if not _group_enabled(gid):
+        logger.info(f"[ai] 群 {gid} 未开启AI，跳过")
         try:
             await bot.send(event, "本群AI还没开启喵，让管理员发 /ai on 开启一下哦")
         except Exception:
@@ -407,8 +408,10 @@ async def _msg_chat(bot: Bot, event: MessageEvent):
 
     now = time.time()
     if now - _last_chat.get(gid, 0) < CHAT_COOLDOWN:
+        logger.info(f"[ai] 群 {gid} 冷却中，跳过")
         return
     _last_chat[gid] = now
+    logger.info(f"[ai] 进入对话: {gid} content={content[:50]!r}")
 
     # 超管 @ 时使用超管专属角色卡（面板配置）
     role_override = None
