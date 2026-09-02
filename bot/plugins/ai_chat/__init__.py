@@ -22,6 +22,7 @@ import urllib.request
 from typing import Dict, List, Optional
 
 from nonebot import logger, on_command, on_message
+from nonebot import get_asgi
 from nonebot.adapters.onebot.v11 import (
     Bot,
     GroupMessageEvent,
@@ -445,3 +446,44 @@ def _seed_superadmins():
 
 
 _seed_superadmins()
+
+
+# ===== 清除上下文：群命令 + HTTP 接口（面板按钮调用） =====
+
+clear_cmd = on_command("clear", aliases={"忘记", "清空记忆"}, priority=5, block=True)
+
+
+@clear_cmd.handle()
+async def _clear_cmd(bot: Bot, event: MessageEvent):
+    if not isinstance(event, GroupMessageEvent):
+        return
+    gid = str(event.group_id)
+    uid = str(event.user_id)
+    arg = event.get_plaintext().replace("/clear", "", 1).strip().lower()
+    if arg in ("all", "全部") and _is_superadmin(event.user_id):
+        keys = [k for k in _contexts if k.startswith(gid + ":") or k == gid]
+        for k in keys:
+            _contexts.pop(k, None)
+        await bot.send(event, f"已清除本群全部记忆（{len(keys)} 个会话）喵")
+    else:
+        _contexts.pop(f"{gid}:{uid}", None)
+        await bot.send(event, "我已经把和你的对话记忆清空啦喵~")
+
+
+try:
+    _asgi = get_asgi()
+
+    @_asgi.post("/api/ai/clear")
+    async def _api_ai_clear(body: dict):
+        gid = str((body or {}).get("gid", ""))
+        if gid:
+            keys = [k for k in _contexts if k.startswith(gid + ":") or k == gid]
+        else:
+            keys = list(_contexts.keys())
+        for k in keys:
+            _contexts.pop(k, None)
+        logger.info(f"[ai] HTTP 清除上下文: gid={gid or 'all'} 共 {len(keys)} 个会话")
+        return {"ok": True, "cleared": len(keys)}
+
+except Exception as e:
+    logger.warning(f"[ai] 注册 HTTP 清除接口失败: {e!r}")

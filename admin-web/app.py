@@ -238,13 +238,14 @@ ADMIN_HTML = """<!doctype html>
 <div class="card">
   <h3 style="margin-top:0;">群开关</h3>
   <table>
-    <tr><th>群号</th><th>AI</th></tr>
+    <tr><th>群号</th><th>AI</th><th>操作</th></tr>
     <tbody id="group-tbody"></tbody>
   </table>
   <div style="margin-top:10px;">
     <input id="new-gid" placeholder="群号" style="width:120px">
     <button onclick="addGroup()">➕ 添加群</button>
-    <span style="font-size:12px;color:#a07a8c;">（也可以在群里让管理员发 /ai on 自动添加）</span>
+    <button class="ghost" onclick="clearGroup('')">🧹 清除全部记忆</button>
+    <span style="font-size:12px;color:#a07a8c;">（也可以在群里让管理员发 /ai on 自动添加；/clear 清自己记忆）</span>
   </div>
 </div>
 
@@ -401,9 +402,18 @@ async function loadGroups() {
   for (const [gid, g] of Object.entries(groups)) {
     const tr = document.createElement("tr");
     tr.innerHTML = `<td>${gid}</td>
-      <td><input type="checkbox" ${g.enabled ? "checked" : ""} onchange="setGroup('${gid}', this.checked)"></td>`;
+      <td><input type="checkbox" ${g.enabled ? "checked" : ""} onchange="setGroup('${gid}', this.checked)"></td>
+      <td><button class="ghost" onclick="clearGroup('${gid}')">清记忆</button></td>`;
     tbody.appendChild(tr);
   }
+}
+
+async function clearGroup(gid) {
+  if (!confirm(gid ? "清除该群所有人的对话记忆？" : "清除所有群的全部对话记忆？")) return;
+  try {
+    const d = await api("/api/ai_clear", "POST", { gid });
+    show("🧹 已清除 " + (d.cleared || 0) + " 个会话记忆", true);
+  } catch (e) { show("清除失败: " + e.message, false); }
 }
 
 async function addGroup() {
@@ -670,6 +680,20 @@ def api_config():
             "web_search": bool(a.get("web_search", False)),
         }
     )
+
+
+@app.post("/api/ai_clear")
+def api_ai_clear():
+    """清除 bot 对话记忆（代理到 bot 容器的 HTTP 接口）。"""
+    body = request.get_json(silent=True) or {}
+    gid = str(body.get("gid", ""))
+    try:
+        r = requests.post(
+            "http://bot:8080/api/ai/clear", json={"gid": gid}, timeout=8
+        )
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify(error=f"调用 bot 清除接口失败: {e!r}"), 502
 
 
 @app.post("/api/web_search")
