@@ -382,8 +382,13 @@ async def _msg_chat(bot: Bot, event: MessageEvent):
         at_me = bool(getattr(event, "to_me", False))
     logger.info(f"[ai] at_me={at_me} to_me={getattr(event, 'to_me', None)} self_id={bot.self_id}")
 
+    # 群开关：未开启时完全静默（@、触发词、纯@ 都不回）
+    if not _group_enabled(gid):
+        logger.info(f"[ai] 群 {gid} 未开启AI，静默跳过")
+        return
+
     if at_me and not text:
-        # 纯 @ 没带话
+        # 纯 @ 没带话（群已开启）
         try:
             await bot.send(event, "喊妈妈什么事喵？")
         except Exception:
@@ -404,11 +409,6 @@ async def _msg_chat(bot: Bot, event: MessageEvent):
                 ).strip()
                 break
     if not content:
-        return
-
-    # 群开关（未开启时静默跳过，不发任何提醒）
-    if not _group_enabled(gid):
-        logger.info(f"[ai] 群 {gid} 未开启AI，静默跳过")
         return
 
     now = time.time()
