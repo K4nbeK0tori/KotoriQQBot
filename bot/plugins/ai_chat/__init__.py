@@ -406,13 +406,9 @@ async def _msg_chat(bot: Bot, event: MessageEvent):
     if not content:
         return
 
-    # 群开关（未开启时提示，方便排查）
+    # 群开关（未开启时静默跳过，不发任何提醒）
     if not _group_enabled(gid):
-        logger.info(f"[ai] 群 {gid} 未开启AI，跳过")
-        try:
-            await bot.send(event, "本群AI还没开启喵，让管理员发 /ai on 开启一下哦")
-        except Exception:
-            pass
+        logger.info(f"[ai] 群 {gid} 未开启AI，静默跳过")
         return
 
     now = time.time()
