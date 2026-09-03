@@ -23,7 +23,7 @@ from .core import (
 )
 
 # 防刷：下载是重操作，同一会话 N 秒内只处理一次
-RATE_LIMIT_SECONDS = 60
+RATE_LIMIT_SECONDS = 5
 _last_handle: Dict[str, float] = {}
 # 全局下载锁：1C1G 机器上同时只允许一个下载，防止资源耗尽
 _download_lock = asyncio.Lock()
